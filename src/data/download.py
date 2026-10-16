@@ -1,3 +1,9 @@
+"""Скачивание исходного датасета kdduha/shikimori-recsys с Hugging Face.
+
+Запуск из корня проекта: uv run python src/data/download.py
+Ревизия закреплена в REVISION для воспроизводимости; файлы кладутся в data/raw.
+"""
+
 from pathlib import Path
 
 from huggingface_hub import snapshot_download
@@ -9,6 +15,11 @@ FILES = ("anime.csv", "genres.csv", "users_rates.csv")
 
 
 def download_dataset(output_dir: Path) -> dict[str, Path]:
+    """Скачивает файлы датасета фиксированной ревизии.
+
+    :param output_dir: Каталог для файлов (создаётся при необходимости).
+    :return: {имя файла: путь}; RuntimeError, если какой-то файл не скачался.
+    """
     output_dir.mkdir(parents=True, exist_ok=True)
 
     snapshot_download(
