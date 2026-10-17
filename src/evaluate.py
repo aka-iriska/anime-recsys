@@ -1,6 +1,3 @@
-"""Offline evaluation of rankers on the val/test users (protocol v0)."""
-
-
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
