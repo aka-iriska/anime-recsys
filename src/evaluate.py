@@ -9,7 +9,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 INTERACTIONS = ROOT / "data" / "processed" / "interactions_v0"
 
-KS = (10, 20)
+KS = (10, 20, 100)  # 100: метрика стадии retrieval (попали ли ответы в кандидаты)
 SEED = 42
 
 # ranker(user_id, candidates) -> те же anime_id, упорядоченные от лучшего к худшему
@@ -188,6 +188,86 @@ def evaluate(
         result[f"coverage@{k}"] = len(shown[k]) / len(catalog)
     result["users"] = len(cases)
     return result
+
+
+def evaluate_per_user(
+    ranker: Ranker,
+    cases: dict[int, tuple[set[int], set[int]]],
+    catalog: np.ndarray,
+    ks: Sequence[int] = KS,
+) -> pd.DataFrame:
+    """Метрики каждого пользователя отдельно (нужны для доверительных интервалов).
+
+    Для каждого пользователя кандидаты — каталог без уже виденного (seen), как в evaluate.
+
+    :param ranker: Функция ranker(user_id, candidates).
+    :param cases: {user_id: (seen, targets)} из build_cases.
+    :param catalog: Массив anime_id допустимых кандидатов.
+    :param ks: Значения k для метрик.
+    :return: DataFrame: индекс user_id, колонки recall@k, hit_rate@k и ndcg@k для каждого k.
+        Покрытие не входит: оно считается по всей выдаче, а не по одному пользователю.
+    """
+    rows = {}
+    for user_id, (seen, targets) in cases.items():
+        candidates = catalog[~np.isin(catalog, list(seen))]
+        ranked = ranker(user_id, candidates)
+        row = {}
+        for k in ks:
+            row[f"recall@{k}"] = recall_at_k(ranked, targets, k)
+            row[f"hit_rate@{k}"] = hit_rate_at_k(ranked, targets, k)
+            row[f"ndcg@{k}"] = ndcg_at_k(ranked, targets, k)
+        rows[user_id] = row
+    return pd.DataFrame.from_dict(rows, orient="index")
+
+
+def bootstrap_ci(
+    values: np.ndarray, n_boot: int = 2000, confidence: float = 0.95, seed: int = SEED
+) -> tuple[float, float]:
+    """YOU: доверительный интервал для среднего значения метрики по пользователям (bootstrap).
+
+    :param values: Значение метрики для каждого пользователя, форма (n_users,).
+    :param n_boot: Сколько раз повторять выборку.
+    :param confidence: Уровень доверия (0.95 даёт границы по 2,5% и 97,5%).
+    :param seed: Зерно генератора случайных чисел (результат должен воспроизводиться).
+    :return: (нижняя граница, верхняя граница) интервала для среднего.
+
+    Идея: повторяем много раз «как будто у нас другая выборка пользователей»: выбираем
+    n_users значений из values С ВОЗВРАЩЕНИЕМ (один пользователь может попасть дважды,
+    другой ни разу), считаем среднее. Получаем n_boot средних; их разброс и есть оценка
+    шума. Границы интервала — квантили этих средних.
+
+    Подсказки:
+    - Генератор: np.random.default_rng(seed); выбор с возвращением: rng.integers или
+      rng.choice(values, size=..., replace=True).
+    - Все n_boot выборок можно получить одним массивом формы (n_boot, n_users) и взять
+      среднее по оси 1: цикл не нужен. Память: 2000 × 173 чисел, это немного.
+    - Квантили: np.quantile(means, [нижний, верхний]); при confidence=0.95 это 0.025 и 0.975.
+    - Проверь на значениях, где ответ понятен: если все values одинаковы, обе границы
+      равны этому значению.
+    """
+    raise NotImplementedError
+
+
+def paired_bootstrap_diff(
+    values_a: pd.Series, values_b: pd.Series, **kwargs
+) -> tuple[float, float, float]:
+    """Средняя разница метрики между двумя моделями и её доверительный интервал.
+
+    Парный вариант: для каждого пользователя считаем разницу a − b и берём bootstrap
+    уже по этим разницам. Так учитывается, что обе модели оценены на одних и тех же
+    пользователях: общая «сложность» пользователя вычитается и не раздувает шум.
+    Если интервал не содержит 0, разница не объясняется случайной выборкой пользователей.
+
+    :param values_a: Метрика первой модели по пользователям (индекс user_id).
+    :param values_b: Метрика второй модели по тем же пользователям.
+    :param kwargs: Параметры для bootstrap_ci (n_boot, confidence, seed).
+    :return: (средняя разница, нижняя граница, верхняя граница).
+    """
+    if not values_a.index.equals(values_b.index):
+        raise ValueError("Models must be evaluated on the same users in the same order")
+    diff = (values_a - values_b).to_numpy()
+    low, high = bootstrap_ci(diff, **kwargs)
+    return float(diff.mean()), low, high
 
 
 def main(group: str = "val") -> None:

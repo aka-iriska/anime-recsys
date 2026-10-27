@@ -142,23 +142,40 @@ def score_candidates(similarity: np.ndarray, history: np.ndarray) -> np.ndarray:
 
 
 def make_item_knn_ranker(
-    similarity: np.ndarray, item_ids: np.ndarray, histories: dict[int, np.ndarray]
+    similarity: np.ndarray,
+    item_ids: np.ndarray,
+    histories: dict[int, np.ndarray],
+    audience: np.ndarray | None = None,
+    alpha: float = 0.0,
 ) -> ev.Ranker:
     """Ранжер по сходству с историей пользователя.
 
     Пользователь без истории получает нулевые баллы, и порядок для него задаётся
     только по anime_id (в будущем сюда можно подставить популярность).
 
+    Поправка на популярность (эксперимент E02c): балл кандидата делится на
+    размер его аудитории в степени alpha. При alpha = 0 поправки нет; чем больше
+    alpha, тем сильнее ослабляются хиты.
+
     :param similarity: Матрица сходства (n_items, n_items).
     :param item_ids: Отсортированный массив anime_id (порядок строк и столбцов).
     :param histories: Результат build_histories.
+    :param audience: Число train-пользователей, досмотревших каждое аниме, форма
+        (n_items,); нужно, если alpha > 0 (matrix.sum(axis=0)).
+    :param alpha: Сила поправки на популярность, не меньше 0.
     :return: Функция ranker(user_id, candidates).
     """
     empty = np.array([], dtype=int)
+    if alpha > 0:
+        require(audience is not None, "audience is required when alpha > 0")
+        penalty = np.maximum(audience, 1.0) ** alpha  # популярные аниме делим на большее число
 
     def ranker(user_id: int, candidates: np.ndarray) -> np.ndarray:
         scores = score_candidates(similarity, histories.get(user_id, empty))
-        values = scores[np.searchsorted(item_ids, candidates)]  # баллы только кандидатов
+        columns = np.searchsorted(item_ids, candidates)
+        values = scores[columns]  # баллы только кандидатов
+        if alpha > 0:
+            values = values / penalty[columns]
         order = np.lexsort((candidates, -values))  # по убыванию балла, при равенстве по id
         return candidates[order]
 
