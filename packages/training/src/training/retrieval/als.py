@@ -88,6 +88,29 @@ def fit_als(confidence: csr_matrix, factors: int) -> AlternatingLeastSquares:
     return model
 
 
+def score_items(model: AlternatingLeastSquares, history: np.ndarray, n_items: int) -> np.ndarray:
+    """Баллы всех аниме каталога для одного пользователя по его истории.
+
+    Общий шаг для ленты (make_als_ranker) и для датасета ранжирования (баллы кандидатов).
+
+    :param model: Результат fit_als.
+    :param history: Номера столбцов матрицы (не anime_id) аниме, которые пользователь досмотрел;
+        может быть пустым.
+    :param n_items: Число аниме в каталоге.
+    :return: Вектор формы (n_items,): чем больше, тем лучше аниме подходит пользователю.
+    """
+    if len(history) == 0:
+        # без истории вектора нет: все баллы нулевые
+        return np.zeros(n_items, dtype=np.float32)
+
+    # история в том же виде, что строки обучающей матрицы
+    row = history_row(history, n_items)
+    # вектор пользователя: один шаг iALS по его истории при фиксированных векторах аниме
+    user_vector = model.recalculate_user(0, row)  # (factors,)
+    # балл каждого аниме: скалярное произведение его вектора с вектором пользователя
+    return model.item_factors @ user_vector  # (n_items,)
+
+
 def make_als_ranker(
     model: AlternatingLeastSquares, item_ids: np.ndarray, histories: dict[int, np.ndarray]
 ) -> protocol.Ranker:
@@ -107,17 +130,8 @@ def make_als_ranker(
     def ranker(user_id: int, candidates: np.ndarray) -> np.ndarray:
         # что пользователь досмотрел (его input): номера столбцов матрицы
         history = histories.get(user_id, empty)
-
-        if len(history) == 0:
-            # без истории вектора нет: все баллы нулевые
-            scores = np.zeros(n_items, dtype=np.float32)
-        else:
-            # история в том же виде, что строки обучающей матрицы
-            row = history_row(history, n_items)
-            # вектор пользователя: один шаг iALS по его истории при фиксированных векторах аниме
-            user_vector = model.recalculate_user(0, row)  # (factors,)
-            # балл каждого аниме: скалярное произведение его вектора с вектором пользователя
-            scores = model.item_factors @ user_vector  # (n_items,)
+        # баллы всех аниме каталога по его истории
+        scores = score_items(model, history, n_items)
 
         # баллы только кандидатов: переводим anime_id кандидатов в номера столбцов
         columns = np.searchsorted(item_ids, candidates)
