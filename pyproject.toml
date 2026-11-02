@@ -1,13 +1,13 @@
 [project]
 name = "shikimori-rec-sys"
 version = "0.1.0"
-description = "Add your description here"
+description = "Anime recommender for Shikimori users: research workspace"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "catboost>=1.2.10",
-    "numpy>=2.5.3",
-    "pandas>=3.0.6",
+    "core",
+    "serving",
+    "training",
 ]
 
 [dependency-groups]
@@ -15,18 +15,11 @@ dev = [
     "ipykernel>=7.3.0",
     "matplotlib>=3.11.2",
 ]
-train = [
-    "huggingface-hub>=2.4.0",
-    "implicit>=0.7.3",
-    "scipy>=1.18.1",
-]
 
-[tool.uv]
-default-groups = ["dev", "train"]  # локально ставим всё; для выдачи: uv sync --no-default-groups
+[tool.uv.workspace]
+members = ["packages/*"]  # core, serving, training; прод ставит только serving: uv sync --package serving
 
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
-[tool.hatch.build.targets.wheel]
-packages = ["src/shikimori_rec"]
+[tool.uv.sources]
+core = { workspace = true }
+serving = { workspace = true }
+training = { workspace = true }

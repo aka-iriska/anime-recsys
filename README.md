@@ -57,15 +57,15 @@ A snapshot of 2,000 active Shikimori users collected on 2026-09-24 with a modifi
 ## Quick start
 
 ```bash
-uv sync                                                    # installs the package and all groups
-uv run python -m shikimori_rec.ingestion.build_dataset     # raw snapshots in data/raw -> normalized tables
-uv run python -m shikimori_rec.interactions.prepare        # catalog, labels, user split
-uv run python -m shikimori_rec.retrieval.als               # compare retrieval models on validation
-uv run python -m shikimori_rec.pipelines.export_models     # train the final iALS, save to models/
+uv sync                                                    # installs core, serving, training and notebook tools
+uv run python -m training.ingestion.build_dataset     # raw snapshots in data/raw -> normalized tables
+uv run python -m training.interactions.prepare        # catalog, labels, user split
+uv run python -m training.retrieval.als               # compare retrieval models on validation
+uv run python -m training.pipelines.export_models     # train the final iALS, save to models/
 ```
 
 ```python
-from shikimori_rec.serving.recommender import Recommender
+from serving.recommender import Recommender
 
 feed = Recommender.load().recommend(history=[1, 205, 30, 47, 43], k=5)
 for item in feed:
@@ -74,24 +74,40 @@ for item in feed:
 
 For the history *Cowboy Bebop, Samurai Champloo, Evangelion, Akira, Ghost in the Shell* this returns *The End of Evangelion*, *Cowboy Bebop: The Movie*, *Great Teacher Onizuka*, *Perfect Blue*, *Paprika*.
 
-Serving needs only the base dependencies (`uv sync --no-default-groups`); training libraries live in the `train` group.
+For production, install only the serving package: `uv sync --package serving --no-dev`.
+
+## Run the API
+
+```bash
+uv run python -m training.pipelines.export_models   # once: writes models/als_v0
+docker compose up --build                            # backend on http://localhost:8000
+```
+
+```bash
+curl -X POST localhost:8000/feed -H "Content-Type: application/json" -d '{"history": [1, 205, 30, 47, 43], "k": 5}'
+```
+
+The image contains only `core` and `serving`; model files are mounted from `models/`, so retraining needs a container restart, not a rebuild. Without Docker: `uv run uvicorn serving.api:app`. A web frontend is planned (`docker compose --profile frontend up`).
 
 ## Repository
 
 ```
-src/shikimori_rec/
-  ingestion/      raw snapshots -> normalized tables
-  catalog/        what can be recommended, anime attributes
-  interactions/   labels, user split, evaluation data
-  evaluation/     metrics, evaluation loop, bootstrap
-  retrieval/      popularity, item-kNN, PureSVD, iALS
-  ranking/        leak-free candidate dataset, CatBoost ranker
-  serving/        Recommender: feed from exported artifacts
-  pipelines/      offline jobs that export models for serving
-notebooks/        audit, baselines, item-kNN, retrieval comparison, ranking
-docs/             system design, dataset schema, recsys playbook
-experiments/      index of experiments with key metrics
+packages/
+  core/       shared kernel: paths, catalog rules, anime features
+  serving/    Recommender: builds a feed from exported model files
+  training/   everything offline
+    ingestion/      raw snapshots -> normalized tables
+    interactions/   labels, user split, evaluation data
+    evaluation/     metrics, evaluation loop, bootstrap
+    retrieval/      popularity, item-kNN, PureSVD, iALS
+    ranking/        leak-free candidate dataset, CatBoost ranker
+    pipelines/      train final models and export them for serving
+notebooks/    audit, baselines, item-kNN, retrieval comparison, ranking
+docs/         system design, dataset schema, recsys playbook
+experiments/  index of experiments with key metrics
 ```
+
+Three packages in one uv workspace. `serving` depends only on `core`, so a production image contains no training code or training libraries.
 
 The notebooks hold the reasoning behind each decision; [experiments/README.md](experiments/README.md) lists every experiment with its numbers.
 

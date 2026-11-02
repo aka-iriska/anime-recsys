@@ -1,0 +1,26 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: deploy/backend/Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./models:/app/models:ro  # артефакты модели: переобучили — перезапустили контейнер, пересборка не нужна
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  frontend:
+    profiles: ["frontend"]  # не запускается по умолчанию, пока нет папки frontend/
+    build:
+      context: ./frontend
+    ports:
+      - "3000:80"
+    environment:
+      - API_URL=http://localhost:8000  # адрес бэкенда, как его видит браузер
+    depends_on:
+      backend:
+        condition: service_healthy
