@@ -8,8 +8,10 @@ import numpy as np
 import pandas as pd
 
 from core import config, logs
+from core.validation import require
+from core.catalog import franchise
 from training.evaluation import protocol
-from training.interactions import store
+from training.interactions import split, store
 from training.retrieval import als
 from training.retrieval import item_knn as knn
 
@@ -20,23 +22,27 @@ N_FOLDS = 5             # на сколько частей делим train-по
 N_CANDIDATES = 100      # сколько кандидатов retrieval передаёт в ranking
 FACTORS = 128           # iALS из E05
 MIN_COMPLETED = 5       # train-пользователь даёт примеры, если у него столько completed в каталоге
-TARGET_FRACTION = 0.2   # доля completed, которую прячем (как у val/test)
+TARGET_FRACTION = split.TARGET_FRACTION  # доля completed, которую прячем (как у val/test)
 SEED = 42
 
-# подробности по шагам; включить: core.logs.enable()
+# подробности по шагам; включить: core.logs.enable("DEBUG")
 logger = logging.getLogger(__name__)
 
 
 def split_train_users(table: pd.DataFrame, item_ids: np.ndarray, train_users: np.ndarray) -> dict[int, dict]:
     """Для train-пользователей с >= MIN_COMPLETED completed: часть, input и target.
 
-    :param table: Таблица взаимодействий из interactions_v0.
+    target выбирается тем же правилом, что у val/test (split.pick_targets): без аниме,
+    продолжение которого пользователь досмотрел.
+
+    :param table: Таблица взаимодействий из config.INTERACTIONS.
     :param item_ids: Отсортированные anime_id каталога (порядок столбцов матрицы).
     :param train_users: user_id в порядке строк матрицы из knn.build_train_matrix.
     :return: {user_id: {"fold", "row", "input_completed", "input_all", "target"}}, где
         индексы — номера столбцов матрицы; row — номер строки пользователя в матрице.
     """
     rng = np.random.default_rng(SEED)
+    sequels = franchise.load_sequels()
 
     # все строки train-пользователей (любой статус), в фиксированном порядке для воспроизводимости
     train = table[table["split"] == "train"]
@@ -58,6 +64,7 @@ def split_train_users(table: pd.DataFrame, item_ids: np.ndarray, train_users: np
     folds = shuffled % N_FOLDS
 
     users = {}
+    n_without_target = 0
     for user_id, fold in zip(eligible, folds):
         rows = by_user[user_id]
 
@@ -66,9 +73,13 @@ def split_train_users(table: pd.DataFrame, item_ids: np.ndarray, train_users: np
         is_completed = (rows["status"] == "completed").to_numpy()
         completed = cols[is_completed]
 
-        # прячем 20% completed (не меньше одного): это будущие метки 1
-        n_target = max(1, round(TARGET_FRACTION * len(completed)))
-        target = rng.choice(completed, size=n_target, replace=False)
+        # прячем 20% completed без «дыр» во франшизах: это будущие метки 1
+        hidden = split.pick_targets(item_ids[completed], sequels, rng, TARGET_FRACTION)
+        target = np.searchsorted(item_ids, hidden)
+        # спрятать нечего: пользователь не даёт примеров
+        if len(target) == 0:
+            n_without_target += 1
+            continue
 
         # input — всё остальное: по completed из него считаем вектор, всё из него исключаем из кандидатов
         users[user_id] = {
@@ -78,15 +89,25 @@ def split_train_users(table: pd.DataFrame, item_ids: np.ndarray, train_users: np
             "input_all": np.setdiff1d(cols, target),
             "target": np.sort(target),
         }
+    logger.info("train-пользователей без аниме, которые можно спрятать (пропущены): %d из %d", n_without_target, len(eligible))
 
-    # сводка для лога: сколько пользователей в части и сколько у них input / target
-    summary = pd.DataFrame({
-        "fold": [info["fold"] for info in users.values()],
-        "input": [len(info["input_completed"]) for info in users.values()],
-        "target": [len(info["target"]) for info in users.values()],
-    })
-    by_fold = summary.groupby("fold").agg(users=("input", "size"), input_mean=("input", "mean"), target_mean=("target", "mean"))
-    logs.table(logger, "train-пользователи по частям (input — знает модель, target — спрятано)", by_fold.round(1))
+    # правило протокола: ни у одного спрятанного аниме продолжение не лежит в input
+    holes = 0
+    for info in users.values():
+        kept = set(item_ids[info["input_completed"]].tolist())
+        for anime_id in item_ids[info["target"]].tolist():
+            holes += len(sequels.get(anime_id, set()) & kept)
+    require(holes == 0, f"{holes} target anime of train users are prequels of their input")
+
+    # сводка для лога: сколько пользователей в части и сколько у них input / target (только для отладки)
+    if logger.isEnabledFor(logging.DEBUG):
+        summary = pd.DataFrame({
+            "fold": [info["fold"] for info in users.values()],
+            "input": [len(info["input_completed"]) for info in users.values()],
+            "target": [len(info["target"]) for info in users.values()],
+        })
+        by_fold = summary.groupby("fold").agg(users=("input", "size"), input_mean=("input", "mean"), target_mean=("target", "mean"))
+        logs.table(logger, "train-пользователи по частям (input — знает модель, target — спрятано)", by_fold.round(1))
     return users
 
 
@@ -95,7 +116,7 @@ def input_histories(table: pd.DataFrame, item_ids: np.ndarray, users: dict[int, 
 
     Признаки пары считаются только по этой истории: спрятанные ответы в неё не входят.
 
-    :param table: Таблица взаимодействий из interactions_v0.
+    :param table: Таблица взаимодействий из config.INTERACTIONS.
     :param item_ids: Отсортированные anime_id каталога.
     :param users: Результат split_train_users.
     :param group: Группа проверочных пользователей: "val" или "test".
@@ -217,7 +238,7 @@ def build_eval_candidates(table: pd.DataFrame,
                           ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Кандидаты для val (или test): iALS обучен на всех train-пользователях.
 
-    :param table: Таблица взаимодействий из interactions_v0.
+    :param table: Таблица взаимодействий из config.INTERACTIONS.
     :param catalog: Массив anime_id каталога.
     :param matrix: Матрица (n_users, n_items) из knn.build_train_matrix.
     :param item_ids: Отсортированные anime_id каталога.
@@ -325,7 +346,8 @@ def main() -> None:
         "built_at_utc": datetime.now(timezone.utc).isoformat(),
         "config": {"n_folds": N_FOLDS, "n_candidates": N_CANDIDATES, "factors": FACTORS,
                    "alpha": als.ALPHA, "regularization": als.REGULARIZATION, "iterations": als.ITERATIONS,
-                   "min_completed": MIN_COMPLETED, "target_fraction": TARGET_FRACTION, "seed": SEED},
+                   "min_completed": MIN_COMPLETED, "target_fraction": TARGET_FRACTION,
+                   "target_rule": split.TARGET_RULE, "seed": SEED},
         "summary": summary,
     }
     with (OUTPUT / "manifest.json").open("w", encoding="utf-8") as handle:
@@ -336,6 +358,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    # подробные логи по шагам; уровень — переменная окружения RECSYS_LOG_LEVEL (по умолчанию DEBUG)
+    # подробные логи по шагам; уровень — переменная окружения RECSYS_LOG_LEVEL (по умолчанию INFO, таблицы — DEBUG)
     logs.enable()
     main()
