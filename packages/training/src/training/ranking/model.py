@@ -28,15 +28,25 @@ def popularity_by_fold(table: pd.DataFrame, users: dict[int, dict]) -> pd.DataFr
     :param users: Результат rd.split_train_users (у кого какая часть).
     :return: DataFrame с колонками fold, anime_id, popularity.
     """
-    completed = table[(table["split"] == "train") & (table["status"] == "completed")]
+    # все досмотренные train-пользователями аниме
+    is_train_completed = (table["split"] == "train") & (table["status"] == "completed")
+    completed = table[is_train_completed]
+
+    # часть каждого просмотра: часть его пользователя, -1 — пользователь не попал в части
     fold_of_user = {u: info["fold"] for u, info in users.items()}
-    user_fold = completed["user_id"].map(fold_of_user).fillna(-1).astype(int)  # -1: не в частях
+    user_fold = completed["user_id"].map(fold_of_user).fillna(-1).astype(int)
 
     frames = []
     for fold in [-1, *range(rd.N_FOLDS)]:
-        rows = completed if fold == -1 else completed[user_fold != fold]
+        # для val считаем по всем, для части f — без её пользователей
+        if fold == -1:
+            rows = completed
+        else:
+            rows = completed[user_fold != fold]
+        # число разных зрителей каждого аниме, в логарифме
         counts = rows.groupby("anime_id")["user_id"].nunique()
-        frames.append(pd.DataFrame({"fold": fold, "anime_id": counts.index, "popularity": np.log1p(counts.to_numpy())}))
+        popularity = np.log1p(counts.to_numpy())
+        frames.append(pd.DataFrame({"fold": fold, "anime_id": counts.index, "popularity": popularity}))
     return pd.concat(frames, ignore_index=True)
 
 
@@ -48,8 +58,11 @@ def build_features(candidates: pd.DataFrame, item_features: pd.DataFrame, popula
     :param popularity: Результат popularity_by_fold.
     :return: Кандидаты с добавленными колонками-признаками, тот же порядок строк.
     """
+    # популярность берём из своей части: для train — без своих пользователей, для val — по всем
     out = candidates.merge(popularity, on=["fold", "anime_id"], how="left")
-    out["popularity"] = out["popularity"].fillna(0.0)  # аниме без train-зрителей в своей части
+    # аниме без train-зрителей в своей части: популярность 0
+    out["popularity"] = out["popularity"].fillna(0.0)
+    # признаки аниме одинаковы для всех пользователей
     out = out.merge(item_features, left_on="anime_id", right_index=True, how="left")
     return out
 
@@ -72,9 +85,12 @@ def categorical_as_text(features: pd.DataFrame) -> pd.DataFrame:
     :return: Копия таблицы, где колонки из CATEGORICAL_FEATURES приведены к строкам.
     """
     features = features.copy()
-    for column in features.columns.intersection(anime.CATEGORICAL_FEATURES):
+    categorical = features.columns.intersection(anime.CATEGORICAL_FEATURES)
+    for column in categorical:
+        # pandas хранит пропуски в строковых колонках особым значением: превращаем их в "unknown"
         values = features[column].astype("object")
-        features[column] = values.where(values.notna(), "unknown").astype(str).to_numpy(dtype=object)
+        values = values.where(values.notna(), "unknown")
+        features[column] = values.astype(str).to_numpy(dtype=object)
     return features
 
 
@@ -85,14 +101,13 @@ def make_pool(data: pd.DataFrame, columns: list[str]) -> Pool:
     :param columns: Колонки-признаки из feature_columns.
     :return: Pool для обучения CatBoostRanker.
     """
+    # CatBoost требует, чтобы строки одного списка (пользователя) шли подряд
     data = data.sort_values(["group", "user_id", "retrieval_rank"])
     features = categorical_as_text(data[columns])
-    return Pool(
-        features,
-        label=data["label"],
-        group_id=data["group"] + "_" + data["user_id"].astype(str),
-        cat_features=[c for c in columns if c in anime.CATEGORICAL_FEATURES],
-    )
+    # идентификатор списка: группа и пользователь (train и val не смешиваются)
+    group_id = data["group"] + "_" + data["user_id"].astype(str)
+    cat_features = [c for c in columns if c in anime.CATEGORICAL_FEATURES]
+    return Pool(features, label=data["label"], group_id=group_id, cat_features=cat_features)
 
 
 def train_ranker(train_pool: Pool, params: dict | None = None, eval_pool: Pool | None = None) -> CatBoostRanker:
@@ -104,7 +119,10 @@ def train_ranker(train_pool: Pool, params: dict | None = None, eval_pool: Pool |
     :param eval_pool: Pool для ранней остановки по NDCG@10; None — без ранней остановки.
     :return: Обученная модель.
     """
-    params = {"iterations": ITERATIONS, "learning_rate": LEARNING_RATE, "depth": DEPTH, **(params or {})}
+    # значения по умолчанию, поверх них — переданные параметры
+    defaults = {"iterations": ITERATIONS, "learning_rate": LEARNING_RATE, "depth": DEPTH}
+    params = {**defaults, **(params or {})}
+
     model = CatBoostRanker(
         loss_function=LOSS,
         eval_metric="NDCG:top=10",
@@ -116,6 +134,7 @@ def train_ranker(train_pool: Pool, params: dict | None = None, eval_pool: Pool |
     if eval_pool is None:
         model.fit(train_pool)
     else:
+        # остановка, если NDCG@10 на проверочной части 50 итераций не растёт; берём лучшую итерацию
         model.fit(train_pool, eval_set=eval_pool, use_best_model=True, early_stopping_rounds=50)
     return model
 
@@ -134,8 +153,12 @@ def list_metrics(scored: pd.DataFrame, score_column: str, cases: dict, ks=(10, 2
     """
     rows = {}
     for user_id, group in scored.groupby("user_id"):
-        ranked = group.sort_values(score_column, ascending=False, kind="stable")["anime_id"].to_numpy()
+        # лента пользователя: кандидаты по убыванию балла
+        ordered = group.sort_values(score_column, ascending=False, kind="stable")
+        ranked = ordered["anime_id"].to_numpy()
+        # спрятанные ответы пользователя
         targets = cases[user_id][1]
+        # метрики при каждом k
         row = {}
         for k in ks:
             row[f"recall@{k}"] = metrics.recall_at_k(ranked, targets, k)
@@ -156,14 +179,21 @@ def prepare() -> tuple[pd.DataFrame, list[str]]:
     candidates = pd.read_csv(rd.OUTPUT / "candidates.csv")
 
     # те же части train-пользователей, что при сборке датасета (нужны для популярности без утечки)
-    matrix_users = np.sort(table.loc[(table["split"] == "train") & (table["status"] == "completed"), "user_id"].unique())
+    is_train_completed = (table["split"] == "train") & (table["status"] == "completed")
+    matrix_users = np.sort(table.loc[is_train_completed, "user_id"].unique())
     item_ids = np.sort(catalog)
     users = rd.split_train_users(table, item_ids, matrix_users)
+    popularity = popularity_by_fold(table, users)
 
-    # признаки аниме только для каталога и сборка общей таблицы
-    item_features = anime.anime_features(anime.load_anime()).loc[lambda d: d.index.isin(item_ids)]
-    data = build_features(candidates, item_features, popularity_by_fold(table, users))
-    return data, feature_columns(item_features)
+    # признаки аниме только для каталога
+    raw_anime = anime.load_anime()
+    item_features = anime.anime_features(raw_anime)
+    item_features = item_features[item_features.index.isin(item_ids)]
+
+    # общая таблица: каждый кандидат со всеми признаками
+    data = build_features(candidates, item_features, popularity)
+    columns = feature_columns(item_features)
+    return data, columns
 
 
 def evaluate_on_val(model: CatBoostRanker, data: pd.DataFrame, columns: list[str]) -> dict[str, pd.DataFrame]:
@@ -174,13 +204,20 @@ def evaluate_on_val(model: CatBoostRanker, data: pd.DataFrame, columns: list[str
     :param columns: Колонки-признаки.
     :return: {"baseline": ..., "catboost": ...} — метрики по каждому val-пользователю.
     """
+    # спрятанные ответы val-пользователей
     table, _ = store.load_interactions()
     cases = protocol.build_cases(table, "val")
+
+    # кандидаты val и баллы модели для них
     val = data[data["group"] == "val"].copy()
-    # баллы модели и опорная линия: порядок iALS
-    val["model_score"] = model.predict(categorical_as_text(val[columns]))
+    features = categorical_as_text(val[columns])
+    val["model_score"] = model.predict(features)
+    # опорная линия: порядок iALS (чем меньше место, тем лучше)
     val["baseline_score"] = -val["retrieval_rank"]
-    return {"baseline": list_metrics(val, "baseline_score", cases), "catboost": list_metrics(val, "model_score", cases)}
+
+    baseline = list_metrics(val, "baseline_score", cases)
+    catboost = list_metrics(val, "model_score", cases)
+    return {"baseline": baseline, "catboost": catboost}
 
 
 def tune_ranker(data: pd.DataFrame, columns: list[str], n_trials: int = 20, timeout: int = 900,
@@ -197,6 +234,7 @@ def tune_ranker(data: pd.DataFrame, columns: list[str], n_trials: int = 20, time
     :param valid_fold: Часть train, на которой сравниваются наборы параметров.
     :return: Исследование Optuna; лучшие параметры — study.best_params.
     """
+    # обучение на частях train, кроме valid_fold; сравнение наборов — на valid_fold
     train = data[data["group"] == "train"]
     fit_pool = make_pool(train[train["fold"] != valid_fold], columns)
     valid_pool = make_pool(train[train["fold"] == valid_fold], columns)
@@ -210,14 +248,17 @@ def tune_ranker(data: pd.DataFrame, columns: list[str], n_trials: int = 20, time
             "l2_leaf_reg": trial.suggest_float("l2_leaf_reg", 1.0, 30.0, log=True),
         }
         model = train_ranker(fit_pool, params, eval_pool=valid_pool)
+
         # NDCG@10 на проверочной части в лучшей итерации (get_best_score у ранжирования пуст)
         best = int(model.get_best_iteration())
-        ndcg = model.get_evals_result()["validation"]["NDCG:top=10;type=Base"][best]
+        history = model.get_evals_result()["validation"]["NDCG:top=10;type=Base"]
         trial.set_user_attr("best_iteration", best)
-        return float(ndcg)
+        return float(history[best])
 
+    # TPE: следующий набор выбирается с учётом того, какие наборы уже оказались лучше
     optuna.logging.set_verbosity(optuna.logging.WARNING)
-    study = optuna.create_study(direction="maximize", sampler=optuna.samplers.TPESampler(seed=rd.SEED))
+    sampler = optuna.samplers.TPESampler(seed=rd.SEED)
+    study = optuna.create_study(direction="maximize", sampler=sampler)
     study.optimize(objective, n_trials=n_trials, timeout=timeout)
     return study
 
@@ -229,12 +270,20 @@ def run(params: dict | None = None) -> dict:
     :return: Словарь: model, data, columns, per_user (метрики val для baseline и catboost),
         importance (важность признаков).
     """
+    # признаки всех кандидатов
     data, columns = prepare()
-    train_pool = make_pool(data[data["group"] == "train"], columns)
+
+    # обучение на всех train-кандидатах
+    train = data[data["group"] == "train"]
+    train_pool = make_pool(train, columns)
     model = train_ranker(train_pool, params)
+
+    # оценка на val против порядка iALS
     per_user = evaluate_on_val(model, data, columns)
-    # для ранжирующей модели важность считается по изменению функции потерь на обучающих данных
-    importance = pd.Series(model.get_feature_importance(data=train_pool), index=columns).sort_values(ascending=False)
+
+    # важность признаков: для ранжирующей модели считается по изменению функции потерь на train
+    values = model.get_feature_importance(data=train_pool)
+    importance = pd.Series(values, index=columns).sort_values(ascending=False)
     return {"model": model, "data": data, "columns": columns, "per_user": per_user, "importance": importance}
 
 
@@ -247,11 +296,18 @@ def report(per_user: dict[str, pd.DataFrame]) -> pd.DataFrame:
     rows = {}
     for metric in ("ndcg@10", "hit_rate@10", "recall@10"):
         row = {}
+        # среднее и интервал для каждой модели
         for name, df in per_user.items():
-            low, high = stats.bootstrap_ci(df[metric].to_numpy())
-            row[f"{name}"], row[f"{name}_low"], row[f"{name}_high"] = df[metric].mean(), low, high
+            values = df[metric].to_numpy()
+            low, high = stats.bootstrap_ci(values)
+            row[name] = values.mean()
+            row[f"{name}_low"] = low
+            row[f"{name}_high"] = high
+        # парная разница CatBoost минус опорная линия на одних и тех же пользователях
         diff, low, high = stats.paired_bootstrap_diff(per_user["catboost"][metric], per_user["baseline"][metric])
-        row["diff"], row["diff_low"], row["diff_high"] = diff, low, high
+        row["diff"] = diff
+        row["diff_low"] = low
+        row["diff_high"] = high
         rows[metric] = row
     return pd.DataFrame(rows).T
 
@@ -259,7 +315,8 @@ def report(per_user: dict[str, pd.DataFrame]) -> pd.DataFrame:
 def main() -> None:
     """Обучает CatBoost с параметрами по умолчанию и печатает метрики на val и важность признаков."""
     result = run()
-    print(report(result["per_user"]).round(4).to_string())
+    table = report(result["per_user"])
+    print(table.round(4).to_string())
     print()
     print("важность признаков:")
     print(result["importance"].round(2).to_string())
