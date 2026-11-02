@@ -13,24 +13,27 @@ It is also a learning project that walks through a real recommender pipeline end
 
 ## Results
 
-Offline, on 173 held-out users the models never saw during training. For each of them 20% of finished titles are hidden; the question is whether the model brings them back.
+Offline, on 173 held-out users the models never saw during training. For each of them 20% of finished titles are hidden — never a title whose sequel they have also finished, so the model has to guess what comes next rather than fill a gap inside a franchise. The question is whether it brings the hidden titles back.
 
 | Model | Recall@100 (retrieval) | NDCG@10 | Catalog coverage@10 |
 | --- | --- | ---: | ---: |
-| Popularity | 0.384 [0.350–0.418] | 0.314 | 1% |
-| Item-kNN (co-watching) | 0.478 [0.444–0.511] | 0.426 | 3% |
-| PureSVD, k=64 | 0.618 [0.587–0.648] | 0.616 | 7% |
-| **iALS, 128 factors** | **0.647 [0.613–0.679]** | 0.598 | 8% |
+| Popularity | 0.327 [0.295–0.360] | 0.229 | 1% |
+| Item-kNN (co-watching) | 0.417 [0.383–0.450] | 0.295 | 3% |
+| PureSVD, k=64 | 0.555 [0.522–0.585] | 0.502 | 7% |
+| **iALS, 128 factors** | **0.582 [0.547–0.615]** | 0.484 | 9% |
 
-Brackets are 95% bootstrap intervals over users. Every gap in Recall@100 between neighbouring rows is significant in a paired bootstrap. iALS is the current retrieval model; ranking and re-ranking are in progress.
+Brackets are 95% bootstrap intervals over users. Every gap in Recall@100 between neighbouring rows is significant in a paired bootstrap. iALS is the current retrieval model.
+
+**Ranking.** A CatBoost ranker (`YetiRank`) on top of iALS's 100 candidates raises NDCG@10 from 0.484 to 0.590 (+0.106, 95% CI [0.082, 0.129]). Title-level features alone give only +0.024; the gain comes from user–title features, above all franchise links such as "the previous part is finished". Genre match, user profile and favourites add nothing measurable, and neither Optuna tuning nor a seed ensemble helps.
 
 ## What the data taught us
 
 - **A zero score is not a dislike.** 67% of list entries have `score = 0`: people simply don't rate. The positive label is "finished the title", and ratings are kept as a separate signal.
 - **Timestamps can't be trusted as viewing dates.** Lists are often filled in bulk. On 122k prequel–sequel pairs the sequel was added *before* the prequel 15% of the time, and within the same minute 41% of the time. So there is no time-based split; users are split into train / validation / test groups instead.
-- **Popularity is a strong baseline and a bad feed.** It finds something relevant for 80% of users, but shows everyone the same ~60 titles.
+- **Popularity is a strong baseline and a bad feed.** It finds something relevant in the top 10 for 71% of users, but shows everyone the same ~70 titles.
 - **A few heavy users would dominate the model.** The top 1% of users produce 35% of all co-watched pairs, so every user's influence is down-weighted by the size of their list.
-- **Leakage is easy to miss.** When the retrieval model has seen a user's hidden titles, Recall@100 jumps from 0.577 to 0.664. The ranking dataset is therefore built with a 5-fold split over users, and each fold is scored by a model trained without it.
+- **Random hiding creates easy answers.** If any 20% of a user's titles can be hidden, about a third of the hidden ones are gaps inside a franchise (seasons 1 and 3 seen, season 2 hidden), and franchise features find them almost for free. So a title is hidden only if the user hasn't finished its sequel.
+- **Leakage is easy to miss.** When the retrieval model has seen a user's hidden titles, Recall@100 jumps from 0.497 to 0.590. The ranking dataset is therefore built with a 5-fold split over users, and each fold is scored by a model trained without it.
 
 ## How it works
 
@@ -117,7 +120,8 @@ The notebooks hold the reasoning behind each decision; [experiments/README.md](e
 - [x] Baselines: random, popularity
 - [x] Retrieval: item-kNN, PureSVD, iALS, compared with confidence intervals
 - [x] Leak-free dataset for ranking
-- [ ] Ranking with CatBoost: title and user–title features
+- [x] Ranking with CatBoost: title features, Optuna tuning
+- [x] Ranking: user–title features (franchise, genres, profile, favourites)
 - [ ] Re-ranking: franchises, sequel order, diversity
 - [ ] One-time check on the untouched test users
 - [ ] Feedback-loop simulation and a simulated A/B test against popularity
