@@ -7,15 +7,16 @@ from datetime import datetime, timezone
 import pandas as pd
 
 from core import config, logs
+from core.catalog import franchise
 from core.catalog.rules import KEPT_KINDS, MIN_COMPLETED_PER_ANIME, build_catalog, restrict_to_catalog
 from training.interactions.labels import MAIN_POSITIVE, MIN_EXPLICIT_FOR_MEAN, add_above_mean, mark_positives
 from training.interactions.split import (
-    MIN_POSITIVES_PER_USER, SPLITS, TARGET_FRACTION, TARGET_SPLITS, TEST_USER_FRACTION,
+    MIN_POSITIVES_PER_USER, SPLITS, TARGET_FRACTION, TARGET_RULE, TARGET_SPLITS, TEST_USER_FRACTION,
     VAL_USER_FRACTION, VISIBLE_SPLITS, assign_user_groups, drop_unusable_users, split_rows,
 )
 from core.validation import require
 
-# подробности по шагам; включить: core.logs.enable()
+# подробности по шагам; включить: core.logs.enable("DEBUG")
 logger = logging.getLogger(__name__)
 
 
@@ -30,15 +31,17 @@ def load_tables() -> tuple[pd.DataFrame, pd.DataFrame]:
     return rates, anime
 
 
-def check_protocol(table: pd.DataFrame, catalog: set[int]) -> dict[str, int]:
+def check_protocol(table: pd.DataFrame, catalog: set[int], sequels: dict[int, set[int]]) -> dict[str, int]:
     """Валидация данных и протокола.
 
     Проверяет: нет повторов пары пользователь–аниме, все аниме в каталоге,
-    пользователь целиком в одной группе, target состоит из позитивов, каталог
-    построен по train-пользователям. При нарушении бросает ValueError.
+    пользователь целиком в одной группе, target состоит из позитивов, в target нет
+    «дыр» (аниме, продолжение которого есть в input), каталог построен по
+    train-пользователям. При нарушении бросает ValueError.
 
     :param table: Итоговая таблица с колонкой split.
     :param catalog: Множество anime_id разрешённого каталога.
+    :param sequels: Результат franchise.load_sequels.
     :return: Сводка: число строк, пользователей и позитивов по каждому split.
     """
     require(not table.duplicated(["user_id", "anime_id"]).any(), "Repeated user-anime pair")
@@ -56,6 +59,15 @@ def check_protocol(table: pd.DataFrame, catalog: set[int]) -> dict[str, int]:
 
     targets = table[table["split"].isin(TARGET_SPLITS)]
     require(targets["is_positive"].all(), "Target contains non-positive rows")
+
+    # «дыр» нет: ни у одного спрятанного аниме продолжение не лежит в input-позитивах
+    inputs = table[table["split"].isin(["val_input", "test_input"]) & table["is_positive"]]
+    input_pairs = set(zip(inputs["user_id"], inputs["anime_id"]))
+    holes = 0
+    for user_id, anime_id in zip(targets["user_id"], targets["anime_id"]):
+        for sequel in sequels.get(anime_id, set()):
+            holes += (user_id, sequel) in input_pairs
+    require(holes == 0, f"{holes} target rows are prequels of input positives")
 
     # каталог построен только по train-пользователям
     train_completed = (
@@ -101,6 +113,7 @@ def write_outputs(table: pd.DataFrame, catalog: set[int], summary: dict[str, int
             "val_user_fraction": VAL_USER_FRACTION,
             "test_user_fraction": TEST_USER_FRACTION,
             "target_fraction": TARGET_FRACTION,
+            "target_rule": TARGET_RULE,
             "seed": config.SEED,
         },
         "summary": summary,
@@ -111,7 +124,7 @@ def write_outputs(table: pd.DataFrame, catalog: set[int], summary: dict[str, int
 
 
 def main() -> None:
-    """Собирает interactions_v0: типы и флаги, разбиение, каталог по train, проверки.
+    """Собирает config.INTERACTIONS: типы и флаги, разбиение, каталог по train, проверки.
 
     Не перезаписывает существующий config.INTERACTIONS: при его наличии бросает FileExistsError.
     """
@@ -119,24 +132,27 @@ def main() -> None:
         raise FileExistsError(f"Output already exists; nothing was overwritten: {config.INTERACTIONS}")
 
     rates, anime = load_tables()
+    sequels = franchise.load_sequels()
 
     # 1. только допустимые типы; флаги по строке; группы пользователей и split
     kind_ids = set(anime.loc[anime["kind"].isin(KEPT_KINDS), "anime_id"])
     table = mark_positives(restrict_to_catalog(rates, kind_ids))
     groups = assign_user_groups(table)
-    table["split"] = split_rows(table, groups)
-    logs.counts(logger, "строки по частям разбиения", table["split"])
 
-    # 2. каталог только по train-пользователям, затем ограничение каталогом
-    catalog = build_catalog(anime, table[table["split"] == "train"])
+    # 2. каталог только по train-пользователям и ограничение каталогом — до выбора target,
+    # чтобы правило «без дыр» у val/test судило по тем же аниме, что у train-частей ranking
+    train_rows = table[table["user_id"].map(groups) == "train"]
+    catalog = build_catalog(anime, train_rows)
     table = restrict_to_catalog(table, catalog)
+    table["split"] = split_rows(table, groups, sequels)
+    logs.counts(logger, "строки по частям разбиения", table["split"])
     table, dropped_users = drop_unusable_users(table)
     logs.table(logger, "таблица взаимодействий после ограничения каталогом", table)
 
     # 3. признаки, зависящие от других строк пользователя, — по известной части
     table = add_above_mean(table, table["split"].isin(VISIBLE_SPLITS))
 
-    summary = check_protocol(table, catalog)
+    summary = check_protocol(table, catalog, sequels)
     summary["dropped_eval_users"] = dropped_users
     config.INTERACTIONS.mkdir(parents=True)
     write_outputs(table, catalog, summary)
@@ -145,6 +161,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    # подробные логи по шагам; уровень — переменная окружения RECSYS_LOG_LEVEL (по умолчанию DEBUG)
+    # подробные логи по шагам; уровень — переменная окружения RECSYS_LOG_LEVEL (по умолчанию INFO, таблицы — DEBUG)
     logs.enable()
     main()

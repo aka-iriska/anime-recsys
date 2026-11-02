@@ -1737,6 +1737,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "graphviz" },
     { name = "ipykernel" },
     { name = "matplotlib" },
 ]
@@ -1750,6 +1751,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "graphviz", specifier = ">=0.21" },
     { name = "ipykernel", specifier = ">=7.3.0" },
     { name = "matplotlib", specifier = ">=3.11.2" },
 ]

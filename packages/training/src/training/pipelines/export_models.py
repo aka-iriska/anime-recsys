@@ -21,7 +21,7 @@ def production_matrix(table: pd.DataFrame, catalog: np.ndarray) -> tuple[np.ndar
     для выдачи должна учиться на всех данных. Поэтому её качество меряем не на ней, а по
     протоколу в evaluation (E05).
 
-    :param table: Таблица взаимодействий из interactions_v0.
+    :param table: Таблица взаимодействий из config.INTERACTIONS.
     :param catalog: Массив anime_id каталога.
     :return: (matrix, item_ids): бинарная матрица completed формы (n_users, n_items) и
         отсортированные anime_id столбцов.
