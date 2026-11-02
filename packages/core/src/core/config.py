@@ -9,8 +9,8 @@ DATA = ROOT / "data"
 RAW = DATA / "raw"
 PROCESSED = DATA / "processed"
 SOURCE = PROCESSED / "shikimori_v1"  # нормализованные таблицы Shikimori
-INTERACTIONS = PROCESSED / "interactions_v0"  # протокол оценки: каталог и разбиение пользователей
-RANKING_DATA = PROCESSED / "ranking_v0"  # кандидаты для обучения ранжирования
+INTERACTIONS = PROCESSED / "interactions_v2"  # протокол оценки: каталог и разбиение пользователей
+RANKING_DATA = PROCESSED / "ranking_v2"  # кандидаты для обучения ранжирования
 MODELS = Path(os.environ.get("RECSYS_MODELS", ROOT / "models"))  # артефакты итоговых моделей для выдачи
 
 SEED = 42

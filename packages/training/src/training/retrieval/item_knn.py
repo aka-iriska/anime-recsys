@@ -24,7 +24,7 @@ def build_train_matrix(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Строит матрицу «пользователь × аниме» по train-пользователям (бинарное completed).
 
-    :param table: Таблица взаимодействий из interactions_v0.
+    :param table: Таблица взаимодействий из config.INTERACTIONS.
     :param catalog: Массив anime_id допустимого каталога.
     :return: (matrix, user_ids, item_ids): matrix формы (n_users, n_items) из 0.0 и 1.0
         типа float32; строки соответствуют отсортированным user_ids, столбцы —
@@ -108,7 +108,7 @@ def check_similarity(similarity: np.ndarray) -> None:
 def build_histories(table: pd.DataFrame, group: str, item_ids: np.ndarray) -> dict[int, np.ndarray]:
     """Для каждого val/test-пользователя собирает индексы его досмотренного из input.
 
-    :param table: Таблица взаимодействий из interactions_v0.
+    :param table: Таблица взаимодействий из config.INTERACTIONS.
     :param group: 'val' или 'test'.
     :param item_ids: Отсортированный массив anime_id (порядок столбцов матрицы).
     :return: {user_id: массив индексов столбцов}; только строки <group>_input со
