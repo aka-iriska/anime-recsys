@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import optuna
 from catboost import CatBoostRanker, Pool
 
 from training.evaluation import metrics, protocol, stats
@@ -94,22 +95,28 @@ def make_pool(data: pd.DataFrame, columns: list[str]) -> Pool:
     )
 
 
-def train_ranker(train_pool: Pool) -> CatBoostRanker:
+def train_ranker(train_pool: Pool, params: dict | None = None, eval_pool: Pool | None = None) -> CatBoostRanker:
     """Обучает CatBoostRanker на кандидатах train-пользователей.
 
     :param train_pool: Pool из make_pool по строкам group == "train".
+    :param params: Параметры CatBoost (iterations, learning_rate, depth, l2_leaf_reg, ...);
+        None — значения по умолчанию из констант модуля.
+    :param eval_pool: Pool для ранней остановки по NDCG@10; None — без ранней остановки.
     :return: Обученная модель.
     """
+    params = {"iterations": ITERATIONS, "learning_rate": LEARNING_RATE, "depth": DEPTH, **(params or {})}
     model = CatBoostRanker(
         loss_function=LOSS,
-        iterations=ITERATIONS,
-        learning_rate=LEARNING_RATE,
-        depth=DEPTH,
+        eval_metric="NDCG:top=10",
         random_seed=rd.SEED,
         verbose=False,
         allow_writing_files=False,  # не создавать папку catboost_info с логами
+        **params,
     )
-    model.fit(train_pool)
+    if eval_pool is None:
+        model.fit(train_pool)
+    else:
+        model.fit(train_pool, eval_set=eval_pool, use_best_model=True, early_stopping_rounds=50)
     return model
 
 
@@ -138,52 +145,123 @@ def list_metrics(scored: pd.DataFrame, score_column: str, cases: dict, ks=(10, 2
     return pd.DataFrame.from_dict(rows, orient="index")
 
 
-def run() -> dict:
-    """Собирает признаки, обучает модель и считает метрики на val.
+def prepare() -> tuple[pd.DataFrame, list[str]]:
+    """Кандидаты ranking_v0 с признаками: баллы iALS, популярность по своей части, признаки аниме.
 
-    :return: Словарь: model, data (все признаки), val (кандидаты val с баллами),
-        per_user (метрики по пользователям для baseline и catboost), importance.
+    :return: (data, columns): таблица всех кандидатов (train и val) с признаками и список
+        колонок-признаков для модели.
     """
+    # данные протокола и кандидаты от iALS
     table, catalog = store.load_interactions()
     candidates = pd.read_csv(rd.OUTPUT / "candidates.csv")
 
+    # те же части train-пользователей, что при сборке датасета (нужны для популярности без утечки)
     matrix_users = np.sort(table.loc[(table["split"] == "train") & (table["status"] == "completed"), "user_id"].unique())
     item_ids = np.sort(catalog)
-    users = rd.split_train_users(table, item_ids, matrix_users)  # те же части, что при сборке датасета
+    users = rd.split_train_users(table, item_ids, matrix_users)
 
+    # признаки аниме только для каталога и сборка общей таблицы
     item_features = anime.anime_features(anime.load_anime()).loc[lambda d: d.index.isin(item_ids)]
     data = build_features(candidates, item_features, popularity_by_fold(table, users))
-    columns = feature_columns(item_features)
+    return data, feature_columns(item_features)
 
-    train_pool = make_pool(data[data["group"] == "train"], columns)
-    model = train_ranker(train_pool)
-    val = data[data["group"] == "val"].copy()
-    val["model_score"] = model.predict(categorical_as_text(val[columns]))
-    val["baseline_score"] = -val["retrieval_rank"]  # опорная линия: порядок iALS
 
+def evaluate_on_val(model: CatBoostRanker, data: pd.DataFrame, columns: list[str]) -> dict[str, pd.DataFrame]:
+    """Метрики итогового списка на val: CatBoost против порядка iALS.
+
+    :param model: Обученная модель.
+    :param data: Результат prepare.
+    :param columns: Колонки-признаки.
+    :return: {"baseline": ..., "catboost": ...} — метрики по каждому val-пользователю.
+    """
+    table, _ = store.load_interactions()
     cases = protocol.build_cases(table, "val")
-    per_user = {
-        "baseline": list_metrics(val, "baseline_score", cases),
-        "catboost": list_metrics(val, "model_score", cases),
-    }
+    val = data[data["group"] == "val"].copy()
+    # баллы модели и опорная линия: порядок iALS
+    val["model_score"] = model.predict(categorical_as_text(val[columns]))
+    val["baseline_score"] = -val["retrieval_rank"]
+    return {"baseline": list_metrics(val, "baseline_score", cases), "catboost": list_metrics(val, "model_score", cases)}
+
+
+def tune_ranker(data: pd.DataFrame, columns: list[str], n_trials: int = 20, timeout: int = 900,
+                valid_fold: int = 0) -> optuna.Study:
+    """Подбор параметров CatBoost через Optuna на частях train, без val.
+
+    Обучаемся на частях train, кроме valid_fold, и смотрим NDCG@10 на valid_fold (с ранней
+    остановкой). Val в подборе не участвует, поэтому итоговая оценка на val остаётся честной.
+
+    :param data: Результат prepare.
+    :param columns: Колонки-признаки.
+    :param n_trials: Сколько наборов параметров попробовать.
+    :param timeout: Ограничение по времени в секундах.
+    :param valid_fold: Часть train, на которой сравниваются наборы параметров.
+    :return: Исследование Optuna; лучшие параметры — study.best_params.
+    """
+    train = data[data["group"] == "train"]
+    fit_pool = make_pool(train[train["fold"] != valid_fold], columns)
+    valid_pool = make_pool(train[train["fold"] == valid_fold], columns)
+
+    def objective(trial: optuna.Trial) -> float:
+        # пространство поиска: темп обучения, глубина деревьев, регуляризация листьев
+        params = {
+            "iterations": 600,
+            "learning_rate": trial.suggest_float("learning_rate", 0.02, 0.3, log=True),
+            "depth": trial.suggest_int("depth", 4, 8),
+            "l2_leaf_reg": trial.suggest_float("l2_leaf_reg", 1.0, 30.0, log=True),
+        }
+        model = train_ranker(fit_pool, params, eval_pool=valid_pool)
+        # NDCG@10 на проверочной части в лучшей итерации (get_best_score у ранжирования пуст)
+        best = int(model.get_best_iteration())
+        ndcg = model.get_evals_result()["validation"]["NDCG:top=10;type=Base"][best]
+        trial.set_user_attr("best_iteration", best)
+        return float(ndcg)
+
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
+    study = optuna.create_study(direction="maximize", sampler=optuna.samplers.TPESampler(seed=rd.SEED))
+    study.optimize(objective, n_trials=n_trials, timeout=timeout)
+    return study
+
+
+def run(params: dict | None = None) -> dict:
+    """Собирает признаки, обучает модель на всех train-пользователях и считает метрики на val.
+
+    :param params: Параметры CatBoost (например, study.best_params); None — по умолчанию.
+    :return: Словарь: model, data, columns, per_user (метрики val для baseline и catboost),
+        importance (важность признаков).
+    """
+    data, columns = prepare()
+    train_pool = make_pool(data[data["group"] == "train"], columns)
+    model = train_ranker(train_pool, params)
+    per_user = evaluate_on_val(model, data, columns)
     # для ранжирующей модели важность считается по изменению функции потерь на обучающих данных
     importance = pd.Series(model.get_feature_importance(data=train_pool), index=columns).sort_values(ascending=False)
-    return {"model": model, "data": data, "val": val, "per_user": per_user, "importance": importance}
+    return {"model": model, "data": data, "columns": columns, "per_user": per_user, "importance": importance}
+
+
+def report(per_user: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    """Средние, 95% интервалы и парная разница CatBoost с опорной линией.
+
+    :param per_user: Результат evaluate_on_val.
+    :return: DataFrame: строки — метрики, колонки — средние, интервалы и разница.
+    """
+    rows = {}
+    for metric in ("ndcg@10", "hit_rate@10", "recall@10"):
+        row = {}
+        for name, df in per_user.items():
+            low, high = stats.bootstrap_ci(df[metric].to_numpy())
+            row[f"{name}"], row[f"{name}_low"], row[f"{name}_high"] = df[metric].mean(), low, high
+        diff, low, high = stats.paired_bootstrap_diff(per_user["catboost"][metric], per_user["baseline"][metric])
+        row["diff"], row["diff_low"], row["diff_high"] = diff, low, high
+        rows[metric] = row
+    return pd.DataFrame(rows).T
 
 
 def main() -> None:
-    """Печатает метрики на val со 95% интервалами, разницу с опорной линией и важность признаков."""
+    """Обучает CatBoost с параметрами по умолчанию и печатает метрики на val и важность признаков."""
     result = run()
-    per_user = result["per_user"]
-    print("val, метрики итогового списка (среднее [95% интервал]):")
-    for metric in ("ndcg@10", "hit_rate@10", "recall@10"):
-        line = []
-        for name, df in per_user.items():
-            low, high = stats.bootstrap_ci(df[metric].to_numpy())
-            line.append(f"{name} {df[metric].mean():.4f} [{low:.4f}; {high:.4f}]")
-        diff, low, high = stats.paired_bootstrap_diff(per_user["catboost"][metric], per_user["baseline"][metric])
-        print(f"  {metric}: " + " | ".join(line) + f" | разница {diff:+.4f} [{low:+.4f}; {high:+.4f}]")
-    print("\nважность признаков:")
+    print(report(result["per_user"]).round(4).to_string())
+    print()
+    print("важность признаков:")
     print(result["importance"].round(2).to_string())
 
 

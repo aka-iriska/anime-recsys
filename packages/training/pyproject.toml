@@ -12,6 +12,7 @@ dependencies = [
     "implicit>=0.7.3",
     "scipy>=1.18.1",
     "huggingface-hub>=2.4.0",
+    "optuna>=5.0.0",
 ]
 
 [tool.uv.sources]
