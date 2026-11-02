@@ -35,3 +35,8 @@ htmlcov/
 .DS_Store
 Thumbs.db
 /.idea
+/shikimori-rec-sys/.idea
+
+# Generated model artifacts and CatBoost logs
+/models
+catboost_info/

@@ -5,9 +5,12 @@ import pandas as pd
 from implicit.cpu.als import AlternatingLeastSquares
 from scipy.sparse import csr_matrix
 
-import embeddings as emb
-import evaluate as ev
-import item_knn as knn
+from shikimori_rec import config
+from shikimori_rec.evaluation import protocol
+from shikimori_rec.interactions import store
+from shikimori_rec.retrieval import popularity
+from shikimori_rec.retrieval import item_knn as knn
+from shikimori_rec.retrieval import svd as emb
 
 
 # Стартовые значения параметров: взяты как у библиотеки по умолчанию, подбираются на val.
@@ -70,7 +73,7 @@ def fit_als(confidence: csr_matrix, factors: int) -> AlternatingLeastSquares:
         regularization=REGULARIZATION,
         alpha=ALPHA,
         iterations=ITERATIONS,
-        random_state=ev.SEED,
+        random_state=config.SEED,
     )
     model.fit(confidence, show_progress=False)
     return model
@@ -78,7 +81,7 @@ def fit_als(confidence: csr_matrix, factors: int) -> AlternatingLeastSquares:
 
 def make_als_ranker(
     model: AlternatingLeastSquares, item_ids: np.ndarray, histories: dict[int, np.ndarray]
-) -> ev.Ranker:
+) -> protocol.Ranker:
     """Ранжер по ALS: вектор пользователя считается по его истории, балл — скалярное произведение.
 
     Пользователь без истории получает нулевые баллы, порядок для него задаётся только
@@ -111,8 +114,8 @@ def main(group: str = "val") -> None:
 
     :param group: 'val' или 'test'. Тест оставляем для финального сравнения.
     """
-    table, catalog = ev.load_interactions()
-    cases = ev.build_cases(table, group)
+    table, catalog = store.load_interactions()
+    cases = protocol.build_cases(table, group)
 
     matrix, train_users, item_ids = knn.build_train_matrix(table, catalog)
     weights = knn.user_weights(matrix, form=emb.WEIGHT_FORM)
@@ -121,7 +124,7 @@ def main(group: str = "val") -> None:
     similarity = knn.item_similarity(matrix, weights)
     svd_factors = emb.fit_item_factors(matrix, weights, 64)
     rankers = {
-        "popularity": ev.make_popularity_ranker(ev.popularity_scores(table)),
+        "popularity": popularity.make_popularity_ranker(popularity.popularity_scores(table)),
         "item_knn": knn.make_item_knn_ranker(similarity, item_ids, histories),
         "svd_k64": emb.make_svd_ranker(svd_factors, item_ids, histories),
     }
@@ -130,7 +133,7 @@ def main(group: str = "val") -> None:
     for factors in FACTORS:
         rankers[f"als_f{factors}"] = make_als_ranker(fit_als(confidence, factors), item_ids, histories)
 
-    results = pd.DataFrame({name: ev.evaluate(r, cases, catalog) for name, r in rankers.items()})
+    results = pd.DataFrame({name: protocol.evaluate(r, cases, catalog) for name, r in rankers.items()})
     print(f"group={group}, users={len(cases)}, catalog={len(catalog)}, train users={len(train_users)}")
     print(f"ALS: regularization={REGULARIZATION}, alpha={ALPHA}, iterations={ITERATIONS}")
     print("метрики retrieval (главные):")

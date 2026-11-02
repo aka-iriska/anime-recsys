@@ -1,5 +1,3 @@
-"""Эмбеддинги аниме через усечённое сингулярное разложение — PureSVD (эксперимент E04)."""
-
 from __future__ import annotations
 
 import numpy as np
@@ -7,8 +5,11 @@ import pandas as pd
 from scipy.sparse import csr_matrix
 from scipy.sparse.linalg import svds
 
-import evaluate as ev
-import item_knn as knn
+from shikimori_rec.evaluation import protocol
+from shikimori_rec.interactions import store
+from shikimori_rec.retrieval import popularity
+from shikimori_rec.retrieval import item_knn as knn
+from shikimori_rec.validation import require
 
 
 K_VALUES = (16, 32, 64, 128)  # размерности эмбеддингов, которые сравниваем на val
@@ -89,7 +90,6 @@ def fold_in(item_factors: np.ndarray, history: np.ndarray) -> np.ndarray:
     return result
 
 
-
 def check_item_factors(item_factors: np.ndarray, k: int, n_items: int) -> None:
     """Проверяет форму и свойства факторов; при нарушении бросает ValueError.
 
@@ -97,10 +97,10 @@ def check_item_factors(item_factors: np.ndarray, k: int, n_items: int) -> None:
     :param k: Ожидаемая размерность.
     :param n_items: Число аниме в каталоге.
     """
-    knn.require(item_factors.shape == (n_items, k), f"Factors must have shape ({n_items}, {k})")
-    knn.require(np.isfinite(item_factors).all(), "Factors contain NaN or inf")
+    require(item_factors.shape == (n_items, k), f"Factors must have shape ({n_items}, {k})")
+    require(np.isfinite(item_factors).all(), "Factors contain NaN or inf")
     gram = item_factors.T @ item_factors  # для ортонормированных столбцов это единичная матрица
-    knn.require(np.allclose(gram, np.eye(k), atol=1e-3), "Factor columns must be orthonormal")
+    require(np.allclose(gram, np.eye(k), atol=1e-3), "Factor columns must be orthonormal")
 
 
 def make_svd_ranker(
@@ -109,7 +109,7 @@ def make_svd_ranker(
     histories: dict[int, np.ndarray],
     scale: np.ndarray | None = None,
     undo_scale: bool = False,
-) -> ev.Ranker:
+) -> protocol.Ranker:
     """Ранжер по эмбеддингам: балл кандидата — скалярное произведение с вектором пользователя.
 
     Пользователь без истории получает нулевые баллы, порядок для него задаётся только
@@ -148,8 +148,8 @@ def main(group: str = "val") -> None:
 
     :param group: 'val' или 'test'. Тест оставляем для финального сравнения.
     """
-    table, catalog = ev.load_interactions()
-    cases = ev.build_cases(table, group)
+    table, catalog = store.load_interactions()
+    cases = protocol.build_cases(table, group)
 
     matrix, train_users, item_ids = knn.build_train_matrix(table, catalog)
     weights = knn.user_weights(matrix, form=WEIGHT_FORM)
@@ -157,7 +157,7 @@ def main(group: str = "val") -> None:
 
     similarity = knn.item_similarity(matrix, weights)
     rankers = {
-        "popularity": ev.make_popularity_ranker(ev.popularity_scores(table)),
+        "popularity": popularity.make_popularity_ranker(popularity.popularity_scores(table)),
         "item_knn": knn.make_item_knn_ranker(similarity, item_ids, histories),
     }
     for k in K_VALUES:
@@ -175,7 +175,7 @@ def main(group: str = "val") -> None:
             factors, item_ids, histories, scale=scale, undo_scale=True
         )
 
-    results = pd.DataFrame({name: ev.evaluate(r, cases, catalog) for name, r in rankers.items()})
+    results = pd.DataFrame({name: protocol.evaluate(r, cases, catalog) for name, r in rankers.items()})
     print(f"group={group}, users={len(cases)}, catalog={len(catalog)}, train users={len(train_users)}, weight form={WEIGHT_FORM}")
     print("метрики retrieval (главные):")
     print(results.loc[RETRIEVAL_METRICS].round(4).to_string())

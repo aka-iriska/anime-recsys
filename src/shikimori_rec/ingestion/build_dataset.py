@@ -1,12 +1,6 @@
-"""Сборка проверяемых нормализованных таблиц из сырых выгрузок Shikimori.
-
-Запуск из корня проекта: uv run python src/build_dataset.py
-Скрипт создаёт новый каталог data/processed/shikimori_v1 и никогда не меняет и
-не удаляет файлы в data/raw.
-"""
-
 from __future__ import annotations
 
+from shikimori_rec import config
 import csv
 import hashlib
 import json
@@ -15,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = config.ROOT
 RAW = ROOT / "data" / "raw"
 OLD = RAW / "shikimori_all_status_history_2026-09-24"
 EXPANDED = RAW / "shikimori_expanded_users_2000_2026-09-24"

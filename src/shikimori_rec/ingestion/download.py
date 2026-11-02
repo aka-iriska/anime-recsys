@@ -1,12 +1,8 @@
-"""Скачивание исходного датасета kdduha/shikimori-recsys с Hugging Face.
-
-Запуск из корня проекта: uv run python src/data/download.py
-Ревизия закреплена в REVISION для воспроизводимости; файлы кладутся в data/raw.
-"""
-
 from pathlib import Path
 
 from huggingface_hub import snapshot_download
+
+from shikimori_rec import config
 
 
 REPO_ID = "kdduha/shikimori-recsys"
@@ -40,8 +36,7 @@ def download_dataset(output_dir: Path) -> dict[str, Path]:
 
 
 if __name__ == "__main__":
-    project_root = Path(__file__).resolve().parents[2]
-    downloaded = download_dataset(project_root / "data" / "raw")
+    downloaded = download_dataset(config.RAW)
 
     for name, path in downloaded.items():
         print(f"{name}: {path.stat().st_size:,} bytes")

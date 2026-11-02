@@ -3,7 +3,10 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-import evaluate as ev
+from shikimori_rec.evaluation import protocol
+from shikimori_rec.interactions import store
+from shikimori_rec.retrieval import popularity
+from shikimori_rec.validation import require
 
 
 ACCURACY_SHARE = 0.9  # точность модели не ниже этой доли от популярности
@@ -81,12 +84,6 @@ def item_similarity(matrix: np.ndarray, weights: np.ndarray) -> np.ndarray:
     return similarity.astype(np.float32)
 
 
-def require(condition: bool, message: str) -> None:
-    """Бросает ValueError с сообщением message, если condition ложно."""
-    if not condition:
-        raise ValueError(message)
-
-
 def check_similarity(similarity: np.ndarray) -> None:
     """Проверяет форму и свойства матрицы сходства; при нарушении бросает ValueError.
 
@@ -147,7 +144,7 @@ def make_item_knn_ranker(
     histories: dict[int, np.ndarray],
     audience: np.ndarray | None = None,
     alpha: float = 0.0,
-) -> ev.Ranker:
+) -> protocol.Ranker:
     """Ранжер по сходству с историей пользователя.
 
     Пользователь без истории получает нулевые баллы, и порядок для него задаётся
@@ -201,8 +198,8 @@ def main(group: str = "val") -> None:
 
     :param group: 'val' или 'test'. Тест оставляем для финального сравнения.
     """
-    table, catalog = ev.load_interactions()
-    cases = ev.build_cases(table, group)
+    table, catalog = store.load_interactions()
+    cases = protocol.build_cases(table, group)
 
     matrix, user_ids, item_ids = build_train_matrix(table, catalog)
     similarity = item_similarity(matrix, user_weights(matrix))
@@ -210,10 +207,10 @@ def main(group: str = "val") -> None:
 
     histories = build_histories(table, group, item_ids)
     rankers = {
-        "popularity": ev.make_popularity_ranker(ev.popularity_scores(table)),
+        "popularity": popularity.make_popularity_ranker(popularity.popularity_scores(table)),
         "item_knn": make_item_knn_ranker(similarity, item_ids, histories),
     }
-    results = pd.DataFrame({name: ev.evaluate(r, cases, catalog) for name, r in rankers.items()})
+    results = pd.DataFrame({name: protocol.evaluate(r, cases, catalog) for name, r in rankers.items()})
 
     print(f"group={group}, users={len(cases)}, catalog={len(catalog)}, train users={len(user_ids)}")
     print(results.round(4).to_string())
@@ -222,10 +219,3 @@ def main(group: str = "val") -> None:
 
 if __name__ == "__main__":
     main()
-    # similarity = np.array([
-    #     [0.0, 0.5, 0.1, 0.0],  # строка 0: сходство аниме 0 со всеми остальными
-    #     [0.5, 0.0, 0.2, 0.3],  # строка 1
-    #     [0.1, 0.2, 0.0, 0.4],  # строка 2
-    #     [0.0, 0.3, 0.4, 0.0],  # строка 3
-    # ])
-    # score_candidates(similarity, np.array([], dtype=int))
