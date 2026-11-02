@@ -38,6 +38,7 @@ def save_als(path: Path, item_factors: np.ndarray, item_ids: np.ndarray, anime: 
     :param params: Параметры iALS.
     :param manifest: Сводка обучения (дата, число пользователей и т. п.).
     """
+
     path.mkdir(parents=True, exist_ok=True)
     np.save(path / "item_factors.npy", item_factors.astype(np.float32))
     np.save(path / "item_ids.npy", item_ids.astype(np.int64))
@@ -54,6 +55,7 @@ def load_als(path: Path) -> tuple[np.ndarray, np.ndarray, pd.DataFrame, AlsParam
     :param path: Папка артефактов.
     :return: (item_factors, item_ids, справочник аниме, параметры).
     """
+
     item_factors = np.load(path / "item_factors.npy")
     item_ids = np.load(path / "item_ids.npy")
     anime = pd.read_csv(path / "anime.csv")

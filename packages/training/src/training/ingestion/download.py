@@ -2,7 +2,7 @@ from pathlib import Path
 
 from huggingface_hub import snapshot_download
 
-from core import config
+from core import config, logs
 
 
 REPO_ID = "kdduha/shikimori-recsys"
@@ -36,6 +36,8 @@ def download_dataset(output_dir: Path) -> dict[str, Path]:
 
 
 if __name__ == "__main__":
+    # подробные логи по шагам; уровень — переменная окружения RECSYS_LOG_LEVEL (по умолчанию INFO, таблицы — DEBUG)
+    logs.enable()
     downloaded = download_dataset(config.RAW)
 
     for name, path in downloaded.items():

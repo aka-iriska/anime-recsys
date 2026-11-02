@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pandas as pd
 from scipy.sparse import csr_matrix
@@ -9,7 +11,11 @@ from training.evaluation import protocol
 from training.interactions import store
 from training.retrieval import popularity
 from training.retrieval import item_knn as knn
+from core import logs
 from core.validation import require
+
+# подробности по шагам; включить: core.logs.enable("DEBUG")
+logger = logging.getLogger(__name__)
 
 
 K_VALUES = (16, 32, 64, 128)  # размерности эмбеддингов, которые сравниваем на val
@@ -66,6 +72,8 @@ def fit_item_factors(
 
     # svds возвращает факторы по возрастанию важности: ставим самые важные первыми
     vt = vt[np.argsort(-s)]
+    logs.matrix(logger, "SVD: U, векторы пользователей", u)
+    logs.matrix(logger, "SVD: Vt, векторы аниме (строки — факторы)", vt)
 
     # делаем копию матрицы с ПОСТРОЧНЫМ расположением; транспонируем, чтобы строка = вектор одного аниме
     return np.ascontiguousarray(vt.T, dtype=np.float32)
@@ -184,4 +192,6 @@ def main(group: str = "val") -> None:
 
 
 if __name__ == "__main__":
+    # подробные логи по шагам; уровень — переменная окружения RECSYS_LOG_LEVEL (по умолчанию INFO, таблицы — DEBUG)
+    logs.enable()
     main()

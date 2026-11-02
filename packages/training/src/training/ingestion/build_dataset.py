@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from core import config
+from core import config, logs
 import csv
 import hashlib
 import json
@@ -386,4 +386,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    # подробные логи по шагам; уровень — переменная окружения RECSYS_LOG_LEVEL (по умолчанию INFO, таблицы — DEBUG)
+    logs.enable()
     main()

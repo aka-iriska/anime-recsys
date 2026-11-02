@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from core import logs
 from core.config import SEED
 from training.evaluation import protocol
 from training.evaluation.protocol import Ranker
@@ -74,4 +75,6 @@ def main(group: str = "val") -> None:
 
 
 if __name__ == "__main__":
+    # подробные логи по шагам; уровень — переменная окружения RECSYS_LOG_LEVEL (по умолчанию INFO, таблицы — DEBUG)
+    logs.enable()
     main()

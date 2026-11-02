@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pandas as pd
 
+from core import logs
 from training.evaluation import protocol
 from training.interactions import store
 from training.retrieval import popularity
@@ -12,13 +15,16 @@ from core.validation import require
 ACCURACY_SHARE = 0.9  # точность модели не ниже этой доли от популярности
 COVERAGE_FACTOR = 10  # покрытие не меньше, чем в столько раз больше, чем у популярности
 
+# подробности по шагам; включить: core.logs.enable("DEBUG")
+logger = logging.getLogger(__name__)
+
 
 def build_train_matrix(
     table: pd.DataFrame, catalog: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Строит матрицу «пользователь × аниме» по train-пользователям (бинарное completed).
 
-    :param table: Таблица взаимодействий из interactions_v0.
+    :param table: Таблица взаимодействий из config.INTERACTIONS.
     :param catalog: Массив anime_id допустимого каталога.
     :return: (matrix, user_ids, item_ids): matrix формы (n_users, n_items) из 0.0 и 1.0
         типа float32; строки соответствуют отсортированным user_ids, столбцы —
@@ -33,6 +39,7 @@ def build_train_matrix(
 
     matrix = np.zeros((len(user_ids), len(item_ids)), dtype=np.float32)
     matrix[rows, cols] = 1.0
+    logs.matrix(logger, "матрица train: пользователи x аниме, 1 = досмотрел", matrix)
     return matrix, user_ids, item_ids
 
 
@@ -81,6 +88,7 @@ def item_similarity(matrix: np.ndarray, weights: np.ndarray) -> np.ndarray:
     similarity = np.divide(co_viewers, denominator, out=np.zeros_like(co_viewers), where=denominator > 0)
 
     np.fill_diagonal(similarity, 0.0)  # аниме не должно быть похоже само на себя
+    logs.matrix(logger, "матрица сходства аниме x аниме", similarity)
     return similarity.astype(np.float32)
 
 
@@ -100,7 +108,7 @@ def check_similarity(similarity: np.ndarray) -> None:
 def build_histories(table: pd.DataFrame, group: str, item_ids: np.ndarray) -> dict[int, np.ndarray]:
     """Для каждого val/test-пользователя собирает индексы его досмотренного из input.
 
-    :param table: Таблица взаимодействий из interactions_v0.
+    :param table: Таблица взаимодействий из config.INTERACTIONS.
     :param group: 'val' или 'test'.
     :param item_ids: Отсортированный массив anime_id (порядок столбцов матрицы).
     :return: {user_id: массив индексов столбцов}; только строки <group>_input со
@@ -110,6 +118,10 @@ def build_histories(table: pd.DataFrame, group: str, item_ids: np.ndarray) -> di
     histories = {}
     for user_id, user_rows in rows.groupby("user_id"):
         histories[int(user_id)] = np.searchsorted(item_ids, user_rows["anime_id"].to_numpy())
+    # размеры историй для лога (только для отладки)
+    if logger.isEnabledFor(logging.DEBUG):
+        sizes = pd.Series({u: len(h) for u, h in histories.items()}, name="аниме в истории")
+        logs.table(logger, f"размер истории {group}-пользователей", sizes.describe().round(1), rows=10)
     return histories
 
 
@@ -218,4 +230,6 @@ def main(group: str = "val") -> None:
 
 
 if __name__ == "__main__":
+    # подробные логи по шагам; уровень — переменная окружения RECSYS_LOG_LEVEL (по умолчанию INFO, таблицы — DEBUG)
+    logs.enable()
     main()

@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pandas as pd
 
-from core import config
+from core import config, logs
+
+# подробности по шагам; включить: core.logs.enable("DEBUG")
+logger = logging.getLogger(__name__)
 
 
 def load_anime() -> pd.DataFrame:
@@ -24,26 +29,33 @@ def load_anime() -> pd.DataFrame:
 
 
 def anime_features(anime: pd.DataFrame) -> pd.DataFrame:
-    """YOU: признаки аниме для ранжирования.
+    """Признаки аниме для ранжирования: одинаковы для всех пользователей.
+
+    Числовые: год выхода, число серий, длительность серии и общая длительность в минутах
+    (0 в исходных полях означает «нет данных», поэтому заменяется на NaN). Категориальные
+    (строки, пропуск — "unknown"): тип, возрастной рейтинг, первоисточник, первая студия.
 
     :param anime: Результат load_anime (anime_id, kind, rating, origin, episodes, duration,
         aired_on, studio_id).
-    :return: DataFrame с индексом anime_id и колонками-признаками. Категориальные признаки
-        (тип, возрастной рейтинг, первоисточник, студия) — строки; числовые — числа.
-        Названия категориальных колонок перечисли в CATEGORICAL_FEATURES ниже.
-
-    Подсказки:
-    - Год выхода: первые 4 символа aired_on, превращённые в число (pd.to_numeric(...,
-      errors="coerce")): даты есть у всех аниме каталога, но функция не должна падать на пустых.
-    - Длительность: duration — минуты одной серии, episodes — число серий; полезен и их
-      произведение (общая длительность), и сами значения. 0 в этих полях означает «нет данных»,
-      а не ноль: замени на NaN (CatBoost умеет работать с пропусками в числах).
-    - Категориальные: kind, rating, origin как есть; studio_id превратить в строку, пропуск —
-      в "unknown". CatBoost сам закодирует категории, кодировать вручную не нужно.
-    - Не добавляй сюда ничего про пользователя: это признаки только аниме.
-    - Проверка: число строк равно числу аниме в anime, индекс уникальный.
+    :return: DataFrame с индексом anime_id: year, episodes, duration, total_minutes, kind,
+        rating, origin, studio.
     """
-    raise NotImplementedError
+    features = pd.DataFrame(index=pd.Index(anime["anime_id"].to_numpy(), name="anime_id"))
+    # год выхода — первые 4 символа даты начала показа
+    features["year"] = pd.to_numeric(anime["aired_on"].str[:4], errors="coerce").to_numpy()
+    # 0 серий или 0 минут — это пропуск данных, а не настоящий ноль
+    episodes = anime["episodes"].replace(0, np.nan).to_numpy(dtype=float)
+    duration = anime["duration"].replace(0, np.nan).to_numpy(dtype=float)
+    features["episodes"] = episodes
+    features["duration"] = duration
+    # сколько минут займёт просмотр целиком
+    features["total_minutes"] = episodes * duration
+    # категориальные признаки CatBoost закодирует сам; ему нужны строки без пропусков
+    for column in ("kind", "rating", "origin"):
+        features[column] = anime[column].fillna("unknown").astype(str).to_numpy()
+    features["studio"] = anime["studio_id"].map(lambda s: "unknown" if pd.isna(s) else str(int(s))).to_numpy()
+    logs.table(logger, "признаки аниме (одинаковы для всех пользователей)", features)
+    return features
 
 
-CATEGORICAL_FEATURES: list[str] = []  # YOU: впиши названия категориальных колонок из anime_features
+CATEGORICAL_FEATURES: list[str] = ["kind", "rating", "origin", "studio"]
