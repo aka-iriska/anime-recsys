@@ -223,7 +223,7 @@ def evaluate_per_user(
 def bootstrap_ci(
     values: np.ndarray, n_boot: int = 2000, confidence: float = 0.95, seed: int = SEED
 ) -> tuple[float, float]:
-    """YOU: доверительный интервал для среднего значения метрики по пользователям (bootstrap).
+    """Доверительный интервал для среднего значения метрики по пользователям (bootstrap).
 
     :param values: Значение метрики для каждого пользователя, форма (n_users,).
     :param n_boot: Сколько раз повторять выборку.
@@ -235,17 +235,11 @@ def bootstrap_ci(
     n_users значений из values С ВОЗВРАЩЕНИЕМ (один пользователь может попасть дважды,
     другой ни разу), считаем среднее. Получаем n_boot средних; их разброс и есть оценка
     шума. Границы интервала — квантили этих средних.
-
-    Подсказки:
-    - Генератор: np.random.default_rng(seed); выбор с возвращением: rng.integers или
-      rng.choice(values, size=..., replace=True).
-    - Все n_boot выборок можно получить одним массивом формы (n_boot, n_users) и взять
-      среднее по оси 1: цикл не нужен. Память: 2000 × 173 чисел, это немного.
-    - Квантили: np.quantile(means, [нижний, верхний]); при confidence=0.95 это 0.025 и 0.975.
-    - Проверь на значениях, где ответ понятен: если все values одинаковы, обе границы
-      равны этому значению.
     """
-    raise NotImplementedError
+    rng = np.random.default_rng(seed)
+    means = rng.choice(values, size=(n_boot, len(values)), replace=True).mean(axis=1)
+    lo, hi = np.quantile(means, [(1 - confidence) / 2, 1 - (1 - confidence) / 2])
+    return float(lo), float(hi)
 
 
 def paired_bootstrap_diff(
