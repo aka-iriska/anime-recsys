@@ -17,11 +17,15 @@ def enable(level: int | str | None = None) -> None:
 
     :param level: Уровень: logging.DEBUG (или "DEBUG") — таблицы и формы на каждом шаге,
         logging.INFO — только итоги. None — из переменной окружения RECSYS_LOG_LEVEL, а без
-        неё DEBUG.
+        неё INFO. Неизвестное имя уровня не роняет программу: берётся INFO.
     """
     # уровень не задан явно — берём из окружения
     if level is None:
-        level = os.environ.get("RECSYS_LOG_LEVEL", "DEBUG").upper()
+        level = os.environ.get("RECSYS_LOG_LEVEL", "INFO")
+    # имя уровня → число; опечатка в имени не должна ронять обучение
+    if isinstance(level, str):
+        known = logging.getLevelNamesMapping()
+        level = known.get(level.upper(), logging.INFO)
     for name in PACKAGES:
         logger = logging.getLogger(name)
         logger.setLevel(level)

@@ -36,7 +36,7 @@ def download_dataset(output_dir: Path) -> dict[str, Path]:
 
 
 if __name__ == "__main__":
-    # подробные логи по шагам; уровень — переменная окружения RECSYS_LOG_LEVEL (по умолчанию DEBUG)
+    # подробные логи по шагам; уровень — переменная окружения RECSYS_LOG_LEVEL (по умолчанию INFO, таблицы — DEBUG)
     logs.enable()
     downloaded = download_dataset(config.RAW)
 

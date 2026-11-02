@@ -7,7 +7,7 @@ import pandas as pd
 
 from core import config, logs
 
-# подробности по шагам; включить: core.logs.enable()
+# подробности по шагам; включить: core.logs.enable("DEBUG")
 logger = logging.getLogger(__name__)
 
 

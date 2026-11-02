@@ -15,7 +15,7 @@ from core.validation import require
 ACCURACY_SHARE = 0.9  # точность модели не ниже этой доли от популярности
 COVERAGE_FACTOR = 10  # покрытие не меньше, чем в столько раз больше, чем у популярности
 
-# подробности по шагам; включить: core.logs.enable()
+# подробности по шагам; включить: core.logs.enable("DEBUG")
 logger = logging.getLogger(__name__)
 
 
@@ -118,8 +118,10 @@ def build_histories(table: pd.DataFrame, group: str, item_ids: np.ndarray) -> di
     histories = {}
     for user_id, user_rows in rows.groupby("user_id"):
         histories[int(user_id)] = np.searchsorted(item_ids, user_rows["anime_id"].to_numpy())
-    sizes = pd.Series({u: len(h) for u, h in histories.items()}, name="аниме в истории")
-    logs.table(logger, f"размер истории {group}-пользователей", sizes.describe().round(1), rows=10)
+    # размеры историй для лога (только для отладки)
+    if logger.isEnabledFor(logging.DEBUG):
+        sizes = pd.Series({u: len(h) for u, h in histories.items()}, name="аниме в истории")
+        logs.table(logger, f"размер истории {group}-пользователей", sizes.describe().round(1), rows=10)
     return histories
 
 
@@ -228,6 +230,6 @@ def main(group: str = "val") -> None:
 
 
 if __name__ == "__main__":
-    # подробные логи по шагам; уровень — переменная окружения RECSYS_LOG_LEVEL (по умолчанию DEBUG)
+    # подробные логи по шагам; уровень — переменная окружения RECSYS_LOG_LEVEL (по умолчанию INFO, таблицы — DEBUG)
     logs.enable()
     main()

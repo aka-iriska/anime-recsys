@@ -22,7 +22,7 @@ ALPHA = 5.0  # библиотека умножает все значения м�
 ITERATIONS = 15  # число чередований «пересчитать пользователей / пересчитать аниме»
 RETRIEVAL_METRICS = ["recall@100", "hit_rate@100"]  # главные метрики стадии retrieval
 
-# подробности по шагам; включить: core.logs.enable()
+# подробности по шагам; включить: core.logs.enable("DEBUG")
 logger = logging.getLogger(__name__)
 
 
@@ -199,6 +199,6 @@ def main(group: str = "val") -> None:
 
 
 if __name__ == "__main__":
-    # подробные логи по шагам; уровень — переменная окружения RECSYS_LOG_LEVEL (по умолчанию DEBUG)
+    # подробные логи по шагам; уровень — переменная окружения RECSYS_LOG_LEVEL (по умолчанию INFO, таблицы — DEBUG)
     logs.enable()
     main()

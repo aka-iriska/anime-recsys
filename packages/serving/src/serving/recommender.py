@@ -11,7 +11,7 @@ import pandas as pd
 from core import logs
 from serving.artifacts import ALS_ARTIFACTS, AlsParams, load_als
 
-# подробности по шагам; включить: core.logs.enable()
+# подробности по шагам; включить: core.logs.enable("DEBUG")
 logger = logging.getLogger(__name__)
 
 
