@@ -1,6 +1,12 @@
 from __future__ import annotations
 
+import logging
+
 import pandas as pd
+
+from core.logs import num
+
+logger = logging.getLogger(__name__)
 
 
 # Protocol v0 parameters; see the status column in docs/system_design.md.
@@ -25,7 +31,10 @@ def build_catalog(anime: pd.DataFrame, rates: pd.DataFrame) -> set[int]:
     completed_counts = completed.groupby("anime_id").size()  # completed на аниме
     popular = completed_counts[completed_counts >= MIN_COMPLETED_PER_ANIME].index
 
-    return set(good_kind.tolist()) & set(popular.tolist())
+    catalog = set(good_kind.tolist()) & set(popular.tolist())
+    logger.info("каталог: %s аниме (подходящий тип: %s, не меньше %d completed: %s)",
+                num(len(catalog)), num(len(good_kind)), MIN_COMPLETED_PER_ANIME, num(len(popular)))
+    return catalog
 
 
 def restrict_to_catalog(rates: pd.DataFrame, catalog: set[int]) -> pd.DataFrame:

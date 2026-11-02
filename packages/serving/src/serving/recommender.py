@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -7,7 +8,11 @@ from typing import Iterable
 import numpy as np
 import pandas as pd
 
+from core import logs
 from serving.artifacts import ALS_ARTIFACTS, AlsParams, load_als
+
+# подробности по шагам; включить: core.logs.enable()
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -48,6 +53,8 @@ class Recommender:
         self.yty = self.item_factors.T @ self.item_factors  # одинакова для всех пользователей
         self.anime = anime.set_index("anime_id")
         self.column_of = {int(a): i for i, a in enumerate(item_ids)}
+        logs.matrix(logger, "векторы аниме", self.item_factors)
+        logs.matrix(logger, "YtY (общая часть системы уравнений)", self.yty)
 
     @classmethod
     def load(cls, path: Path = ALS_ARTIFACTS) -> Recommender:
@@ -72,6 +79,7 @@ class Recommender:
         if not columns:
             return np.zeros(k)
         watched = self.item_factors[columns]
+        logger.debug("история: %s аниме из каталога", logs.num(len(columns)))
         c = self.params.alpha
         a = self.yty + (c - 1) * watched.T @ watched + self.params.regularization * np.eye(k)
         return np.linalg.solve(a, c * watched.sum(axis=0))

@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import numpy as np
 import pandas as pd
 
-from core import config
+from core import config, logs
 from training.interactions import store
 from training.retrieval import als
 from serving.artifacts import ALS_ARTIFACTS, AlsParams, save_als
@@ -62,4 +62,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    # подробные логи по шагам; уровень — переменная окружения RECSYS_LOG_LEVEL (по умолчанию DEBUG)
+    logs.enable()
     main()

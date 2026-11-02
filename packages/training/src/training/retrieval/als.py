@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pandas as pd
 from implicit.cpu.als import AlternatingLeastSquares
 from scipy.sparse import csr_matrix
 
-from core import config
+from core import config, logs
 from training.evaluation import protocol
 from training.interactions import store
 from training.retrieval import popularity
@@ -19,6 +21,9 @@ REGULARIZATION = 0.01  # штраф за размер векторов; боль
 ALPHA = 5.0  # библиотека умножает все значения матрицы на alpha (общая сила уверенности); 5 лучше 1 и 20 по recall@100 на val
 ITERATIONS = 15  # число чередований «пересчитать пользователей / пересчитать аниме»
 RETRIEVAL_METRICS = ["recall@100", "hit_rate@100"]  # главные метрики стадии retrieval
+
+# подробности по шагам; включить: core.logs.enable()
+logger = logging.getLogger(__name__)
 
 
 def user_confidence(n_completed: np.ndarray | int) -> np.ndarray | float:
@@ -50,7 +55,9 @@ def build_confidence_matrix(matrix: np.ndarray) -> csr_matrix:
     # каждая строка умножается на уверенность своего пользователя
     weighted = matrix * confidence[:, None]
     # храним только ненулевые клетки: матрица заполнена на ~3%
-    return csr_matrix(weighted)
+    confidence_matrix = csr_matrix(weighted)
+    logs.matrix(logger, "матрица уверенностей для iALS", confidence_matrix)
+    return confidence_matrix
 
 
 def history_row(history: np.ndarray, n_items: int) -> csr_matrix:
@@ -85,6 +92,8 @@ def fit_als(confidence: csr_matrix, factors: int) -> AlternatingLeastSquares:
     )
     # обучение: ITERATIONS раз пересчитываем векторы пользователей, затем векторы аниме
     model.fit(confidence, show_progress=False)
+    logs.matrix(logger, "iALS: векторы пользователей", model.user_factors)
+    logs.matrix(logger, "iALS: векторы аниме", model.item_factors)
     return model
 
 
@@ -190,4 +199,6 @@ def main(group: str = "val") -> None:
 
 
 if __name__ == "__main__":
+    # подробные логи по шагам; уровень — переменная окружения RECSYS_LOG_LEVEL (по умолчанию DEBUG)
+    logs.enable()
     main()

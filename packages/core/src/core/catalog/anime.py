@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pandas as pd
 
-from core import config
+from core import config, logs
+
+# подробности по шагам; включить: core.logs.enable()
+logger = logging.getLogger(__name__)
 
 
 def load_anime() -> pd.DataFrame:
@@ -49,6 +54,7 @@ def anime_features(anime: pd.DataFrame) -> pd.DataFrame:
     for column in ("kind", "rating", "origin"):
         features[column] = anime[column].fillna("unknown").astype(str).to_numpy()
     features["studio"] = anime["studio_id"].map(lambda s: "unknown" if pd.isna(s) else str(int(s))).to_numpy()
+    logs.table(logger, "признаки аниме (одинаковы для всех пользователей)", features)
     return features
 
 

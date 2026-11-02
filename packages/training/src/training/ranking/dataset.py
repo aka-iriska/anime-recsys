@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 
 import numpy as np
 import pandas as pd
 
-from core import config
+from core import config, logs
 from training.evaluation import protocol
 from training.interactions import store
 from training.retrieval import als
@@ -21,6 +22,9 @@ FACTORS = 128           # iALS из E05
 MIN_COMPLETED = 5       # train-пользователь даёт примеры, если у него столько completed в каталоге
 TARGET_FRACTION = 0.2   # доля completed, которую прячем (как у val/test)
 SEED = 42
+
+# подробности по шагам; включить: core.logs.enable()
+logger = logging.getLogger(__name__)
 
 
 def split_train_users(table: pd.DataFrame, item_ids: np.ndarray, train_users: np.ndarray) -> dict[int, dict]:
@@ -74,7 +78,43 @@ def split_train_users(table: pd.DataFrame, item_ids: np.ndarray, train_users: np
             "input_all": np.setdiff1d(cols, target),
             "target": np.sort(target),
         }
+
+    # сводка для лога: сколько пользователей в части и сколько у них input / target
+    summary = pd.DataFrame({
+        "fold": [info["fold"] for info in users.values()],
+        "input": [len(info["input_completed"]) for info in users.values()],
+        "target": [len(info["target"]) for info in users.values()],
+    })
+    by_fold = summary.groupby("fold").agg(users=("input", "size"), input_mean=("input", "mean"), target_mean=("target", "mean"))
+    logs.table(logger, "train-пользователи по частям (input — знает модель, target — спрятано)", by_fold.round(1))
     return users
+
+
+def input_histories(table: pd.DataFrame, item_ids: np.ndarray, users: dict[int, dict], group: str = "val") -> pd.DataFrame:
+    """Что «знает» модель о каждом пользователе датасета: его completed из input.
+
+    Признаки пары считаются только по этой истории: спрятанные ответы в неё не входят.
+
+    :param table: Таблица взаимодействий из interactions_v0.
+    :param item_ids: Отсортированные anime_id каталога.
+    :param users: Результат split_train_users.
+    :param group: Группа проверочных пользователей: "val" или "test".
+    :return: DataFrame с колонками user_id, anime_id (только аниме каталога).
+    """
+    frames = []
+    # train: completed без спрятанных 20% — тот же input, что видела модель части
+    for user_id, info in users.items():
+        anime_ids = item_ids[info["input_completed"]]
+        frames.append(pd.DataFrame({"user_id": user_id, "anime_id": anime_ids}))
+
+    # val/test: completed из их input
+    histories = knn.build_histories(table, group, item_ids)
+    for user_id, columns in histories.items():
+        anime_ids = item_ids[columns]
+        frames.append(pd.DataFrame({"user_id": user_id, "anime_id": anime_ids}))
+    history = pd.concat(frames, ignore_index=True)
+    logs.table(logger, "input-истории (что модель знает о пользователях)", history)
+    return history
 
 
 def top_candidates(model, input_completed: np.ndarray, input_all: np.ndarray, n_items: int) -> tuple[np.ndarray, np.ndarray]:
@@ -154,6 +194,7 @@ def build_train_candidates(matrix: np.ndarray, item_ids: np.ndarray, users: dict
         # обучаем iALS на всех строках, кроме пользователей этой части
         keep = np.ones(matrix.shape[0], dtype=bool)
         keep[rows_out] = False
+        logger.debug("часть %d: %s пользователей отложено, iALS учится на %s строках матрицы", fold, logs.num(len(in_fold)), logs.num(keep.sum()))
         confidence = als.build_confidence_matrix(matrix[keep])
         model = als.fit_als(confidence, FACTORS)
 
@@ -163,7 +204,9 @@ def build_train_candidates(matrix: np.ndarray, item_ids: np.ndarray, users: dict
             top, scores = top_candidates(model, info["input_completed"], info["input_all"], n_items)
             rows = candidate_rows("train", fold, user_id, top, scores, info["target"], item_ids)
             frames.append(rows)
-    return pd.concat(frames, ignore_index=True)
+    candidates = pd.concat(frames, ignore_index=True)
+    logs.table(logger, "кандидаты train (100 на пользователя)", candidates)
+    return candidates
 
 
 def build_eval_candidates(table: pd.DataFrame,
@@ -205,7 +248,9 @@ def build_eval_candidates(table: pd.DataFrame,
         rows = candidate_rows(group, -1, user_id, top, scores, target, item_ids)
         frames.append(rows)
         n_targets.append({"group": group, "user_id": user_id, "n_targets": len(target)})
-    return pd.concat(frames, ignore_index=True), pd.DataFrame(n_targets)
+    candidates = pd.concat(frames, ignore_index=True)
+    logs.table(logger, f"кандидаты {group} (100 на пользователя)", candidates)
+    return candidates, pd.DataFrame(n_targets)
 
 
 def build() -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -291,4 +336,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    # подробные логи по шагам; уровень — переменная окружения RECSYS_LOG_LEVEL (по умолчанию DEBUG)
+    logs.enable()
     main()

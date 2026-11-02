@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 
 import pandas as pd
 
-from core import config
+from core import config, logs
 from core.catalog.rules import KEPT_KINDS, MIN_COMPLETED_PER_ANIME, build_catalog, restrict_to_catalog
 from training.interactions.labels import MAIN_POSITIVE, MIN_EXPLICIT_FOR_MEAN, add_above_mean, mark_positives
 from training.interactions.split import (
@@ -13,6 +14,9 @@ from training.interactions.split import (
     VAL_USER_FRACTION, VISIBLE_SPLITS, assign_user_groups, drop_unusable_users, split_rows,
 )
 from core.validation import require
+
+# подробности по шагам; включить: core.logs.enable()
+logger = logging.getLogger(__name__)
 
 
 def load_tables() -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -121,11 +125,13 @@ def main() -> None:
     table = mark_positives(restrict_to_catalog(rates, kind_ids))
     groups = assign_user_groups(table)
     table["split"] = split_rows(table, groups)
+    logs.counts(logger, "строки по частям разбиения", table["split"])
 
     # 2. каталог только по train-пользователям, затем ограничение каталогом
     catalog = build_catalog(anime, table[table["split"] == "train"])
     table = restrict_to_catalog(table, catalog)
     table, dropped_users = drop_unusable_users(table)
+    logs.table(logger, "таблица взаимодействий после ограничения каталогом", table)
 
     # 3. признаки, зависящие от других строк пользователя, — по известной части
     table = add_above_mean(table, table["split"].isin(VISIBLE_SPLITS))
@@ -139,4 +145,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    # подробные логи по шагам; уровень — переменная окружения RECSYS_LOG_LEVEL (по умолчанию DEBUG)
+    logs.enable()
     main()
