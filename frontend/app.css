@@ -1,0 +1,79 @@
+/* Оболочка приложения поверх системы tasteskill (assets/system.css): только то, чего в ките нет.
+   Все отступы – шкала --s-*, радиусы – --r-*, цвета – токены палитры; движение – assets/motion. */
+
+/* ссылка «к ленте» для клавиатуры: невидима, пока не в фокусе, и не сдвигает логотип */
+.skip { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.skip:focus-visible { position: static; width: auto; height: auto; clip-path: none; }
+
+.app { padding: calc(var(--nav) + var(--s-7)) 0 var(--s-9); }
+.app__intro { margin-bottom: var(--s-7); }
+.app__title { font: var(--display-weight) var(--t-h2)/1.1 var(--font-display); letter-spacing: var(--display-tracking); max-width: 26ch; text-wrap: balance; }
+
+/* ---------- панель: поиск и списки */
+.controls { align-items: start; padding: var(--s-5); margin-bottom: var(--s-7); background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); }
+.lists { display: grid; gap: var(--s-4); }
+@media (min-width: 1024px) { .lists { padding-left: var(--s-5); border-left: 1px solid var(--line); } }
+.list-group { display: grid; gap: var(--s-2); }
+.side-title { font: 500 var(--t-label)/1.3 var(--font-text); letter-spacing: 0; color: var(--muted); }
+.side-note { margin: 0; font-size: var(--t-small); line-height: 1.5; color: var(--muted); }
+.side-note:empty { display: none; }
+
+.search { position: relative; }
+.search label { color: var(--muted); font-size: var(--t-label); }
+.search input { height: 48px; }
+.search input::placeholder { color: var(--muted); opacity: 1; }
+.results {
+  position: absolute; z-index: 20; inset: calc(100% + var(--s-2)) 0 auto 0;
+  margin: 0; padding: var(--s-2); list-style: none; max-height: 380px; overflow-y: auto;
+  background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--r-md);
+}
+.results li { display: flex; align-items: center; gap: var(--s-3); padding: var(--s-2); border-radius: var(--r-sm); cursor: pointer;
+  font-size: var(--t-body); font-weight: 400; transition: background-color var(--m-in, 140ms) var(--m-ease, ease); }
+.results li:is(:hover, [aria-selected="true"]) { background: color-mix(in oklab, var(--ink) 8%, var(--surface)); }
+.results li.is-empty { cursor: default; color: var(--muted); }
+.results img, .results .results__ph { flex: none; width: 36px; height: 51px; border-radius: 6px; object-fit: cover; background: var(--bg); }
+.results small { display: block; color: var(--muted); font-size: var(--t-label); }
+
+.chips { display: flex; flex-wrap: wrap; gap: var(--s-2); margin: 0; padding: 0; list-style: none; }
+.chips:empty { display: none; }
+.chips .pill { max-width: 100%; padding-right: var(--s-1); }
+.chips .pill span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip-remove { flex: none; display: inline-grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 999px;
+  background: none; color: var(--muted); font: 400 16px/1 var(--font-text); cursor: pointer;
+  transition: background-color var(--m-in, 140ms) var(--m-ease, ease), color var(--m-in, 140ms) var(--m-ease, ease); }
+.chip-remove:hover { background: color-mix(in oklab, var(--ink) 10%, transparent); color: var(--ink); }
+
+/* ---------- лента */
+.feed-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-3); margin-bottom: var(--s-5); }
+.feed-title { font: 500 var(--t-h3)/1.2 var(--font-display); letter-spacing: -0.02em; }
+.feed-strategy { font-size: var(--t-small); color: var(--muted); }
+.feed { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: var(--card-gap); margin: 0; padding: 0; list-style: none; }
+
+/* карточка: постер вровень с краями, под ним текст; одна высота строки задаётся сеткой */
+.feed-card { padding: 0; gap: 0; overflow: hidden; }
+.feed-card__poster { position: relative; display: block; aspect-ratio: 225 / 318; overflow: hidden; background: var(--bg); }
+.feed-card__poster img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform var(--m-image, 600ms) var(--m-ease, ease); }
+/* без постера: название крупно на фоне, а не пустой прямоугольник */
+.feed-card__fallback { position: absolute; inset: 0; display: none; align-items: flex-end; padding: var(--s-4);
+  font: 500 22px/1.15 var(--font-display); letter-spacing: -0.02em; color: var(--ink);
+  background: color-mix(in oklab, var(--accent) 14%, var(--surface)); }
+.feed-card__poster.is-missing .feed-card__fallback { display: flex; }
+.feed-card__poster.is-missing img { display: none; }
+
+.feed-card__body { display: flex; flex-direction: column; gap: var(--s-2); flex: 1; padding: var(--s-4); }
+.feed-card__title { font: 500 var(--t-body)/1.35 var(--font-text); letter-spacing: -0.01em; }
+.feed-card__meta { margin: 0; font-size: var(--t-label); line-height: 1.4; color: var(--muted); }
+.feed-card__reason { display: flex; gap: var(--s-2); margin: 0; font-size: var(--t-small); line-height: 1.45; color: var(--ink); }
+.feed-card__reason::before { content: ""; flex: none; width: 6px; height: 6px; margin-top: 7px; border-radius: 999px; background: var(--accent); }
+.feed-card__actions { display: flex; gap: var(--s-2); margin-top: auto; padding-top: var(--s-3); }
+.feed-card__actions .btn { flex: 1; padding: 0 var(--s-3); }
+
+/* пока лента обновляется, старые карточки чуть приглушены, а не пропадают */
+.feed[aria-busy="true"] { opacity: .55; transition: opacity var(--m-out, 200ms) var(--m-ease, ease); }
+
+@media (max-width: 639px) {
+  .app { padding-top: calc(var(--nav) + var(--s-6)); }
+  .feed { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .feed-card__body { padding: var(--s-3); }
+  .feed-card__actions { flex-direction: column; }
+}
