@@ -9,11 +9,11 @@
 
 A personal anime feed for [Shikimori](https://shikimori.one) users: give it the titles someone has finished, get back the next ten worth watching.
 
-It is also a learning project that walks through a real recommender pipeline end to end — data audit, an offline evaluation protocol, candidate retrieval, ranking, re-ranking and serving — and checks every step with numbers rather than intuition.
+It is also a learning project that walks through a real recommender pipeline end to end – data audit, an offline evaluation protocol, candidate retrieval, ranking, re-ranking and serving – and checks every step with numbers rather than intuition.
 
 ## Results
 
-Offline, on 173 held-out users the models never saw during training. For each of them 20% of finished titles are hidden — never a title whose sequel they have also finished, so the model has to guess what comes next rather than fill a gap inside a franchise. The question is whether it brings the hidden titles back.
+Offline, on 173 held-out users the models never saw during training. For each of them 20% of finished titles are hidden – never a title whose sequel they have also finished, so the model has to guess what comes next rather than fill a gap inside a franchise. The question is whether it brings the hidden titles back.
 
 | Model | Recall@100 (retrieval) | NDCG@10 | Catalog coverage@10 |
 | --- | --- | ---: | ---: |
@@ -24,7 +24,13 @@ Offline, on 173 held-out users the models never saw during training. For each of
 
 Brackets are 95% bootstrap intervals over users. Every gap in Recall@100 between neighbouring rows is significant in a paired bootstrap. iALS is the current retrieval model.
 
+**Untouched test users** (173 people none of the choices were made on) confirm every stage: NDCG@10 is 0.225 for popularity, 0.522 for iALS, 0.613 for CatBoost and 0.550 after re-ranking, with catalog coverage@10 0.125 – the success criterion holds on test as well.
+
 **Ranking.** A CatBoost ranker (`YetiRank`) on top of iALS's 100 candidates raises NDCG@10 from 0.484 to 0.590 (+0.106, 95% CI [0.082, 0.129]). Title-level features alone give only +0.024; the gain comes from user–title features, above all franchise links such as "the previous part is finished". Genre match, user profile and favourites add nothing measurable, and neither Optuna tuning nor a seed ensemble helps.
+
+**Re-ranking.** Product rules on top of the ranker: never show a sequel before its prequel is finished, at most one title per franchise, and a popularity penalty. The first two cost nothing measurable; the penalty buys catalog coverage@10 from 8% to 12% (the success criterion: 10× popularity) for NDCG@10 0.590 → 0.516, still above the iALS order. The ranker's feed had a sequel without its prequel in 4% of slots and repeated franchises in 9%; after re-ranking, none.
+
+**Simulated A/B against popularity.** The 173 test users open the feed ten times. A user looks at position *i* with probability 1/log2(*i* + 1) and finishes a title only if it is one of their hidden titles; a finished title joins the history, so the next feed changes, and a title shown twice without a finish is not shown again. The full pipeline gets 11.8 finishes per user against 6.2 for a popularity feed with the same product rules, and shows 31% of the catalog against 6%. Split into two halves like a real A/B test (87 and 86 users) the difference is +6.3 [+3.9, +8.5]; with every user seeing both feeds, which only a simulation allows, it is +5.6 [+4.8, +6.5]. The user model is an assumption, not a measurement: only the hidden titles count as wanted, everything else as not.
 
 ## What the data taught us
 
@@ -97,15 +103,18 @@ The image contains only `core` and `serving`; model files are mounted from `mode
 ```
 packages/
   core/       shared kernel: paths, catalog rules, anime features
-  serving/    Recommender: builds a feed from exported model files
+  serving/    Recommender (iALS -> CatBoost -> rules) and the FastAPI app
   training/   everything offline
     ingestion/      raw snapshots -> normalized tables
     interactions/   labels, user split, evaluation data
     evaluation/     metrics, evaluation loop, bootstrap
     retrieval/      popularity, item-kNN, PureSVD, iALS
     ranking/        leak-free candidate dataset, CatBoost ranker
-    pipelines/      train final models and export them for serving
-notebooks/    audit, baselines, item-kNN, retrieval comparison, ranking
+    reranking/      evaluation of the feed rules
+    simulation/     feedback loop and simulated A/B test
+    pipelines/      final test, train final models and export them for serving
+frontend/     static web feed (nginx)
+notebooks/    audit, baselines, item-kNN, retrieval comparison, ranking, re-ranking, test, simulation
 docs/         system design, dataset schema, recsys playbook
 experiments/  index of experiments with key metrics
 ```
@@ -122,10 +131,10 @@ The notebooks hold the reasoning behind each decision; [experiments/README.md](e
 - [x] Leak-free dataset for ranking
 - [x] Ranking with CatBoost: title features, Optuna tuning
 - [x] Ranking: user–title features (franchise, genres, profile, favourites)
-- [ ] Re-ranking: franchises, sequel order, diversity
-- [ ] One-time check on the untouched test users
-- [ ] Feedback-loop simulation and a simulated A/B test against popularity
-- [ ] FastAPI service and a small web feed
+- [x] Re-ranking: franchises, sequel order, popularity penalty
+- [x] One-time check on the untouched test users
+- [x] Feedback-loop simulation and a simulated A/B test against popularity
+- [x] FastAPI service and a small web feed
 
 ## Limitations
 

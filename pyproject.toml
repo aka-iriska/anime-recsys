@@ -13,8 +13,10 @@ dependencies = [
 [dependency-groups]
 dev = [
     "graphviz>=0.21",
+    "httpx>=0.28.1",
     "ipykernel>=7.3.0",
     "matplotlib>=3.11.2",
+    "pytest>=9.2.0",
 ]
 
 [tool.uv.workspace]
