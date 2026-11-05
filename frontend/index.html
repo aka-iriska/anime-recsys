@@ -1,0 +1,107 @@
+<!doctype html>
+<!-- Дизайн по tasteskill 2.5 (design-taste-frontend), вид страницы – приложение (software).
+     Раздача start.mjs: палитра blue-black-cornflower, шрифты onest (Onest + JetBrains Mono), radius round.
+     Система и слой движения скилла: assets/system.css, assets/motion; свои правила – только в app.css. -->
+<html lang="ru" data-type="software" data-radius="round" data-buttons="solid" data-motion>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Аниме-лента: рекомендации по досмотренному на Shikimori</title>
+  <meta name="description" content="Персональная лента аниме по списку досмотренного: iALS отбирает кандидатов, CatBoost их ранжирует, правила убирают повторы франшиз.">
+  <meta name="site-kind" content="software">
+  <meta name="page-type" content="software">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Onest:wght@400..700&family=JetBrains+Mono:wght@400..500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/system.css">
+  <link rel="stylesheet" href="assets/motion/motion.css">
+  <style>
+    :root {
+      --p-bg: #0a0d14; --p-surface: #131824; --p-ink: #e9edf3; --p-muted: #8891a1;
+      --p-accent: #5ab9fc; --p-accent-ink: #0a0d14; --p-action: #5ab9fc; --p-action-ink: #0a0d14;
+      --p-inv-bg: #e9edf3; --p-inv-surface: #d7dbe1; --p-inv-ink: #0a0d14; --p-inv-muted: #54575f;
+      --p-inv-accent: #0a0d14; --p-inv-accent-ink: #e9edf3; --p-inv-action: #0a0d14; --p-inv-action-ink: #e9edf3;
+      --font-display: "Onest", system-ui, sans-serif;
+      --font-text: "Onest", system-ui, sans-serif;
+      --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+      --display-weight: 400;
+      --display-tracking: -0.035em;
+      --display-tracking-xl: -0.04em;
+    }
+  </style>
+  <link rel="stylesheet" href="app.css">
+  <script src="config.js"></script>
+</head>
+<body>
+  <header class="nav">
+    <div class="wrap nav__bar">
+      <a class="skip" href="#feed-title">К ленте</a>
+      <a class="nav__logo" href="./" aria-label="Аниме-лента, в начало">
+        <span class="mark" data-mark="dots" aria-hidden="true"></span>Аниме-лента
+      </a>
+      <span class="nav__links" aria-hidden="true"></span>
+      <button id="reset" class="btn btn--secondary btn--sm" type="button">Начать заново</button>
+    </div>
+  </header>
+
+  <main class="app">
+    <div class="wrap">
+      <div class="app__intro">
+        <h1 class="app__title">Лента аниме по тому, что вы досмотрели. <span class="muted">Модель учится на списках 2 000 зрителей Shikimori.</span></h1>
+      </div>
+
+      <div class="controls grid" aria-label="Ваши списки">
+        <div class="field search span-5">
+          <label for="search">Добавить досмотренное</label>
+          <input id="search" type="search" placeholder="Евангелион, Bebop, Атака титанов…" autocomplete="off"
+                 role="combobox" aria-expanded="false" aria-controls="results" aria-autocomplete="list">
+          <ul id="results" class="results" role="listbox" hidden></ul>
+        </div>
+        <div class="span-7 lists">
+          <div class="list-group">
+            <h2 class="side-title">Досмотрено</h2>
+            <ul id="history" class="chips" aria-label="Досмотренные"></ul>
+            <p id="history-empty" class="side-note">Пока пусто: лента покажет популярное. Добавьте пару аниме – она станет вашей.</p>
+          </div>
+          <div class="list-group">
+            <h2 class="side-title">Не показывать</h2>
+            <ul id="excluded" class="chips" aria-label="Скрытые"></ul>
+            <p id="excluded-empty" class="side-note">Скрытые из ленты появятся здесь.</p>
+          </div>
+        </div>
+      </div>
+
+      <section class="app__feed" aria-labelledby="feed-title">
+        <div class="feed-head">
+          <h2 id="feed-title" class="feed-title">Лента</h2>
+          <span id="feed-strategy" class="feed-strategy" hidden></span>
+        </div>
+        <p id="status" class="side-note" role="status"></p>
+        <ol id="feed" class="feed"></ol>
+      </section>
+    </div>
+  </main>
+
+  <template id="card-template">
+    <li class="card feed-card">
+      <a class="m-zoom feed-card__poster" target="_blank" rel="noopener">
+        <img alt="" loading="lazy" referrerpolicy="no-referrer">
+        <span class="feed-card__fallback" aria-hidden="true"></span>
+      </a>
+      <div class="feed-card__body">
+        <h3 class="feed-card__title"></h3>
+        <p class="feed-card__meta"></p>
+        <p class="feed-card__reason"></p>
+        <div class="feed-card__actions">
+          <button class="btn btn--secondary btn--sm watched" type="button">Досмотрел</button>
+          <button class="btn btn--secondary btn--sm skip-item" type="button">Скрыть</button>
+        </div>
+      </div>
+    </li>
+  </template>
+
+  <script src="app.js"></script>
+  <script type="module" src="assets/system.js"></script>
+  <script type="module" src="assets/motion/motion.js"></script>
+</body>
+</html>

@@ -6,7 +6,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./models:/app/models:ro  # артефакты модели: переобучили — перезапустили контейнер, пересборка не нужна
+      - ./models:/app/models:ro  # артефакты модели: переобучили – перезапустили контейнер, пересборка не нужна
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 10s
@@ -14,7 +14,6 @@ services:
       retries: 5
 
   frontend:
-    profiles: ["frontend"]  # не запускается по умолчанию, пока нет папки frontend/
     build:
       context: ./frontend
     ports:
