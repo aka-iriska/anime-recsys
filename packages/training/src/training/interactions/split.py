@@ -3,15 +3,10 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from core import config
+from core.settings import PROTOCOL
 
 
-MIN_POSITIVES_PER_USER = 5  # пользователь с меньшим числом позитивов всегда в train
-VAL_USER_FRACTION = 0.1  # доля оцениваемых пользователей в val
-TEST_USER_FRACTION = 0.1  # доля оцениваемых пользователей в test
-TARGET_FRACTION = 0.2  # доля позитивов val/test-пользователя, уходящая в target
 SPLITS = ("train", "val_input", "val_target", "test_input", "test_target")
-TARGET_RULE = "no anime whose direct sequel the user has also completed"  # правило pick_targets для manifest
 VISIBLE_SPLITS = ("train", "val_input", "test_input")  # строки, известные модели
 TARGET_SPLITS = ("val_target", "test_target")
 
@@ -19,19 +14,24 @@ TARGET_SPLITS = ("val_target", "test_target")
 def assign_user_groups(table: pd.DataFrame) -> pd.Series:
     """Возвращает группу каждого пользователя: 'train', 'val' или 'test'.
 
-    Выбирает пользователей с >= MIN_POSITIVES_PER_USER позитивов, делит их на train, val (10%) и test(10%).
+    Выбирает пользователей с >= PROTOCOL.min_positives_per_user позитивов, делит их на train, val (10%) и test(10%).
 
     :param table: с user_id и is_positive.
-    :returns Series: индекс — user_id.
+    :returns Series: индекс – user_id.
     """
 
     positives = table.loc[table["is_positive"]].groupby("user_id").size()
-    groups = pd.Series("train", index=np.sort(table["user_id"].unique()), name="user_group")
+    # по умолчанию все пользователи в train
+    user_ids = np.sort(table["user_id"].unique())
+    groups = pd.Series("train", index=user_ids, name="user_group")
 
-    eligible = np.sort(positives[positives >= MIN_POSITIVES_PER_USER].index.to_numpy())
-    shuffled = np.random.default_rng(config.SEED).permutation(eligible)
-    n_test = round(TEST_USER_FRACTION * len(eligible))
-    n_val = round(VAL_USER_FRACTION * len(eligible))
+    # оцениваемые – с достаточным числом позитивов, в случайном порядке
+    enough = positives[positives >= PROTOCOL.min_positives_per_user]
+    eligible = np.sort(enough.index.to_numpy())
+    rng = np.random.default_rng(PROTOCOL.seed)
+    shuffled = rng.permutation(eligible)
+    n_test = round(PROTOCOL.test_user_fraction * len(eligible))
+    n_val = round(PROTOCOL.val_user_fraction * len(eligible))
 
     groups.loc[shuffled[:n_test]] = "test"
     groups.loc[shuffled[n_test:n_test + n_val]] = "val"
@@ -39,30 +39,36 @@ def assign_user_groups(table: pd.DataFrame) -> pd.Series:
 
 
 def pick_targets(watched: np.ndarray, sequels: dict[int, set[int]], rng: np.random.Generator,
-                 fraction: float = TARGET_FRACTION) -> np.ndarray:
+                 fraction: float = PROTOCOL.target_fraction) -> np.ndarray:
     """Какие из досмотренных аниме спрятать: fraction от них, но без «дыр» во франшизах.
 
     Прятать можно только аниме, продолжение которого пользователь не досмотрел. Иначе в
     истории остаётся, например, 1-й и 3-й сезон, а спрятан 2-й: такую «дыру» легко угадать
-    по связям франшизы, а в продукте её почти не бывает — сезоны смотрят по порядку. Задача
-    проверки — угадать, что человек посмотрит дальше, а не что пропущено в середине.
+    по связям франшизы, а в продукте её почти не бывает – сезоны смотрят по порядку. Задача
+    проверки – угадать, что человек посмотрит дальше, а не что пропущено в середине.
 
     :param watched: anime_id досмотренных пользователем аниме (позитивы).
     :param sequels: Результат franchise.load_sequels: anime_id → его прямые продолжения.
     :param rng: Генератор случайных чисел (для воспроизводимости).
     :param fraction: Доля досмотренного, которую прячем (не меньше одного аниме).
     :return: anime_id спрятанных аниме: fraction от всего досмотренного, но не больше, чем
-        можно спрятать. Предел срабатывает редко (на interactions_v2 — у 2 из 1731
+        можно спрятать. Предел срабатывает редко (на interactions_v2 – у 2 из 1731
         пользователей): обычно можно спрятать около 70% истории, а прячется 20%. Пустой
         массив, если спрятать нечего.
     """
     watched_set = set(watched.tolist())
     # можно прятать: ни одно прямое продолжение аниме не досмотрено
-    hideable = [a for a in watched.tolist() if not (sequels.get(a, set()) & watched_set)]
+    hideable = []
+    for anime_id in watched.tolist():
+        own_sequels = sequels.get(anime_id, set())
+        sequel_watched = bool(own_sequels & watched_set)
+        if not sequel_watched:
+            hideable.append(anime_id)
     # сколько прятать: доля от всего досмотренного, но не больше, чем можно
     n_target = max(1, round(fraction * len(watched)))
     n_target = min(n_target, len(hideable))
-    return rng.choice(np.array(hideable, dtype=watched.dtype), size=n_target, replace=False)
+    options = np.array(hideable, dtype=watched.dtype)
+    return rng.choice(options, size=n_target, replace=False)
 
 
 def split_rows(table: pd.DataFrame, groups: pd.Series, sequels: dict[int, set[int]]) -> pd.Series:
@@ -82,10 +88,11 @@ def split_rows(table: pd.DataFrame, groups: pd.Series, sequels: dict[int, set[in
 
     # кандидаты: с позитивной оценкой и для test/val
     candidates = table[table["is_positive"] & is_eval].sort_values(["user_id", "anime_id"])
-    rng = np.random.default_rng(config.SEED)
+    rng = np.random.default_rng(PROTOCOL.seed)
     for _, rows in candidates.groupby("user_id"):
-        # 20% позитивов пользователя — в target, но не аниме с досмотренным продолжением
-        hidden = pick_targets(rows["anime_id"].to_numpy(), sequels, rng)
+        # 20% позитивов пользователя – в target, но не аниме с досмотренным продолжением
+        watched = rows["anime_id"].to_numpy()
+        hidden = pick_targets(watched, sequels, rng)
         chosen = rows.index[rows["anime_id"].isin(hidden)]
         split.loc[chosen] = group.loc[chosen] + "_target"
     return split

@@ -6,17 +6,39 @@ import numpy as np
 import pandas as pd
 
 from core import logs
+from core.settings import EVALUATION
 from training.evaluation import protocol
 from training.interactions import store
 from training.retrieval import popularity
 from core.validation import require
 
 
-ACCURACY_SHARE = 0.9  # точность модели не ниже этой доли от популярности
-COVERAGE_FACTOR = 10  # покрытие не меньше, чем в столько раз больше, чем у популярности
 
 # подробности по шагам; включить: core.logs.enable("DEBUG")
 logger = logging.getLogger(__name__)
+
+
+def build_matrix(rows: pd.DataFrame, item_ids: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Бинарная матрица «пользователь × аниме» по строкам взаимодействий.
+
+    Общий шаг для офлайн-оценки (train-пользователи) и итоговой модели (все пользователи):
+    различается только то, какие строки передаются.
+
+    :param rows: Строки (user_id, anime_id) – обычно досмотренное.
+    :param item_ids: Отсортированные anime_id каталога (порядок столбцов).
+    :return: (matrix, user_ids): matrix формы (n_users, n_items) из 0.0 и 1.0 типа float32,
+        строки – отсортированные user_ids.
+    """
+    user_column = rows["user_id"].to_numpy()
+    anime_column = rows["anime_id"].to_numpy()
+    user_ids = np.sort(np.unique(user_column))
+    # номер строки и столбца для каждой пары
+    row_index = np.searchsorted(user_ids, user_column)
+    column_index = np.searchsorted(item_ids, anime_column)
+    # 1 там, где пользователь досмотрел аниме
+    matrix = np.zeros((len(user_ids), len(item_ids)), dtype=np.float32)
+    matrix[row_index, column_index] = 1.0
+    return matrix, user_ids
 
 
 def build_train_matrix(
@@ -27,18 +49,12 @@ def build_train_matrix(
     :param table: Таблица взаимодействий из config.INTERACTIONS.
     :param catalog: Массив anime_id допустимого каталога.
     :return: (matrix, user_ids, item_ids): matrix формы (n_users, n_items) из 0.0 и 1.0
-        типа float32; строки соответствуют отсортированным user_ids, столбцы —
+        типа float32; строки соответствуют отсортированным user_ids, столбцы –
         отсортированным item_ids. Память: n_users × n_items × 4 байта (~40 МБ).
     """
     train = table[(table["split"] == "train") & (table["status"] == "completed")]
     item_ids = np.sort(catalog)
-    user_ids = np.sort(train["user_id"].unique())
-
-    rows = np.searchsorted(user_ids, train["user_id"].to_numpy())
-    cols = np.searchsorted(item_ids, train["anime_id"].to_numpy())
-
-    matrix = np.zeros((len(user_ids), len(item_ids)), dtype=np.float32)
-    matrix[rows, cols] = 1.0
+    matrix, user_ids = build_matrix(train, item_ids)
     logs.matrix(logger, "матрица train: пользователи x аниме, 1 = досмотрел", matrix)
     return matrix, user_ids, item_ids
 
@@ -71,7 +87,7 @@ def item_similarity(matrix: np.ndarray, weights: np.ndarray) -> np.ndarray:
     :return: Матрица (n_items, n_items) типа float32: симметричная, значения от 0
         до 1, на диагонали 0 (аниме не должно быть похоже само на себя).
 
-    Что считаем: для пары аниме A и B — взвешенное число общих зрителей,
+    Что считаем: для пары аниме A и B – взвешенное число общих зрителей,
     делённое на корень из произведения взвешенных размеров их аудиторий
     (нормировка на популярность, чтобы хиты не были «похожи на всё»).
     """
@@ -85,7 +101,8 @@ def item_similarity(matrix: np.ndarray, weights: np.ndarray) -> np.ndarray:
     # нормировка на размеры аудиторий обеих аниме; пустая аудитория даёт 0, а не деление на 0
     multiply_audience = np.outer(audience, audience) # [i, j] равен a[i] * b[j]
     denominator = np.sqrt(multiply_audience) # Итого: знаменатель для косинусного сходства
-    similarity = np.divide(co_viewers, denominator, out=np.zeros_like(co_viewers), where=denominator > 0)
+    zeros = np.zeros_like(co_viewers)
+    similarity = np.divide(co_viewers, denominator, out=zeros, where=denominator > 0)
 
     np.fill_diagonal(similarity, 0.0)  # аниме не должно быть похоже само на себя
     logs.matrix(logger, "матрица сходства аниме x аниме", similarity)
@@ -99,10 +116,14 @@ def check_similarity(similarity: np.ndarray) -> None:
     """
     n = similarity.shape[0]
     require(similarity.shape == (n, n), "Similarity must be square")
-    require(np.isfinite(similarity).all(), "Similarity contains NaN or inf")
-    require(np.allclose(similarity, similarity.T, atol=1e-5), "Similarity must be symmetric")
-    require(np.allclose(np.diag(similarity), 0.0), "Diagonal of similarity must be zero")
-    require(similarity.min() >= -1e-6 and similarity.max() <= 1 + 1e-5, "Similarity must be in [0, 1]")
+    finite = np.isfinite(similarity).all()
+    require(finite, "Similarity contains NaN or inf")
+    symmetric = np.allclose(similarity, similarity.T, atol=1e-5)
+    require(symmetric, "Similarity must be symmetric")
+    diagonal = np.diag(similarity)
+    require(np.allclose(diagonal, 0.0), "Diagonal of similarity must be zero")
+    in_range = similarity.min() >= -1e-6 and similarity.max() <= 1 + 1e-5
+    require(in_range, "Similarity must be in [0, 1]")
 
 
 def build_histories(table: pd.DataFrame, group: str, item_ids: np.ndarray) -> dict[int, np.ndarray]:
@@ -111,17 +132,16 @@ def build_histories(table: pd.DataFrame, group: str, item_ids: np.ndarray) -> di
     :param table: Таблица взаимодействий из config.INTERACTIONS.
     :param group: 'val' или 'test'.
     :param item_ids: Отсортированный массив anime_id (порядок столбцов матрицы).
-    :return: {user_id: массив индексов столбцов}; только строки <group>_input со
-        статусом completed (спрятанные target сюда попасть не должны).
+    :return: {user_id: массив индексов столбцов}; досмотренное из input
+        (protocol.completed_input), спрятанные target сюда не попадают.
     """
-    rows = table[(table["split"] == f"{group}_input") & (table["status"] == "completed")]
-    histories = {}
-    for user_id, user_rows in rows.groupby("user_id"):
-        histories[int(user_id)] = np.searchsorted(item_ids, user_rows["anime_id"].to_numpy())
+    completed = protocol.completed_input(table, group)
+    histories = {user_id: np.searchsorted(item_ids, anime_ids) for user_id, anime_ids in completed.items()}
     # размеры историй для лога (только для отладки)
     if logger.isEnabledFor(logging.DEBUG):
         sizes = pd.Series({u: len(h) for u, h in histories.items()}, name="аниме в истории")
-        logs.table(logger, f"размер истории {group}-пользователей", sizes.describe().round(1), rows=10)
+        described = sizes.describe().round(1)
+        logs.table(logger, f"размер истории {group}-пользователей", described, rows=10)
     return histories
 
 
@@ -133,7 +153,7 @@ def score_candidates(similarity: np.ndarray, history: np.ndarray) -> np.ndarray:
         пользователь; может быть пустым.
     :return: Вектор формы (n_items,): чем больше, тем лучше кандидат.
 
-    Идея: балл аниме — сумма его сходств с тем, что пользователь уже досмотрел.
+    Идея: балл аниме – сумма его сходств с тем, что пользователь уже досмотрел.
 
     Подсказки:
     - Выбери строки матрицы для history и просуммируй их по оси 0.
@@ -179,30 +199,31 @@ def make_item_knn_ranker(
         require(audience is not None, "audience is required when alpha > 0")
         penalty = np.maximum(audience, 1.0) ** alpha  # популярные аниме делим на большее число
 
-    def ranker(user_id: int, candidates: np.ndarray) -> np.ndarray:
-        scores = score_candidates(similarity, histories.get(user_id, empty))
-        columns = np.searchsorted(item_ids, candidates)
-        values = scores[columns]  # баллы только кандидатов
+    def score_user(user_id: int) -> np.ndarray:
+        # сумма сходств каждого аниме с историей пользователя
+        history = histories.get(user_id, empty)
+        scores = score_candidates(similarity, history)
+        # поправка на популярность: популярные аниме делим на большее число
         if alpha > 0:
-            values = values / penalty[columns]
-        order = np.lexsort((candidates, -values))  # по убыванию балла, при равенстве по id
-        return candidates[order]
+            scores = scores / penalty
+        return scores
 
-    return ranker
+    return protocol.make_score_ranker(score_user, item_ids)
 
 
 def check_criterion(results: pd.DataFrame, model: str, baseline: str = "popularity") -> dict[str, bool]:
-    """Проверяет критерий успеха: точность не ниже ACCURACY_SHARE от baseline, покрытие в COVERAGE_FACTOR раз больше.
+    """Проверяет критерий успеха: точность не ниже EVALUATION.accuracy_share от baseline, покрытие в EVALUATION.coverage_factor раз больше.
 
-    :param results: Таблица метрик (колонки — модели, строки — метрики).
+    :param results: Таблица метрик (колонки – модели, строки – метрики).
     :param model: Название оцениваемой модели.
     :param baseline: Название опорной модели.
     :return: {'accuracy': bool, 'coverage': bool}.
     """
-    return {
-        "accuracy": results.loc["ndcg@10", model] >= ACCURACY_SHARE * results.loc["ndcg@10", baseline],
-        "coverage": results.loc["coverage@10", model] >= COVERAGE_FACTOR * results.loc["coverage@10", baseline],
-    }
+    ndcg_min = EVALUATION.accuracy_share * results.loc["ndcg@10", baseline]
+    coverage_min = EVALUATION.coverage_factor * results.loc["coverage@10", baseline]
+    accurate = results.loc["ndcg@10", model] >= ndcg_min
+    diverse = results.loc["coverage@10", model] >= coverage_min
+    return {"accuracy": accurate, "coverage": diverse}
 
 
 def main(group: str = "val") -> None:
@@ -214,22 +235,30 @@ def main(group: str = "val") -> None:
     cases = protocol.build_cases(table, group)
 
     matrix, user_ids, item_ids = build_train_matrix(table, catalog)
-    similarity = item_similarity(matrix, user_weights(matrix))
+    weights = user_weights(matrix)
+    similarity = item_similarity(matrix, weights)
     check_similarity(similarity)
 
     histories = build_histories(table, group, item_ids)
+    popularity_scores = popularity.popularity_scores(table)
     rankers = {
-        "popularity": popularity.make_popularity_ranker(popularity.popularity_scores(table)),
+        "popularity": popularity.make_popularity_ranker(popularity_scores),
         "item_knn": make_item_knn_ranker(similarity, item_ids, histories),
     }
-    results = pd.DataFrame({name: protocol.evaluate(r, cases, catalog) for name, r in rankers.items()})
+    # одна и та же оценка для всех моделей на одних и тех же пользователях
+    metrics_by_model = {}
+    for name, ranker in rankers.items():
+        metrics_by_model[name] = protocol.evaluate(ranker, cases, catalog)
+    results = pd.DataFrame(metrics_by_model)
 
     print(f"group={group}, users={len(cases)}, catalog={len(catalog)}, train users={len(user_ids)}")
-    print(results.round(4).to_string())
-    print("criterion:", check_criterion(results, "item_knn"))
+    rounded = results.round(4)
+    print(rounded.to_string())
+    criterion = check_criterion(results, "item_knn")
+    print("criterion:", criterion)
 
 
 if __name__ == "__main__":
-    # подробные логи по шагам; уровень — переменная окружения RECSYS_LOG_LEVEL (по умолчанию INFO, таблицы — DEBUG)
+    # подробные логи по шагам; уровень – переменная окружения RECSYS_LOG_LEVEL (по умолчанию INFO, таблицы – DEBUG)
     logs.enable()
     main()

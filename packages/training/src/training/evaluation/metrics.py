@@ -13,7 +13,7 @@ def recall_at_k(ranked: Sequence[int], targets: set[int], k: int) -> float:
     :param k: Всего мест в топе.
     :return: Число от 0 до 1.
 
-    Знаменатель — число всех targets, а не k. Если у пользователя targets больше k,
+    Знаменатель – число всех targets, а не k. Если у пользователя targets больше k,
     Recall@k не может достичь 1 даже у идеального ранжера: это нормально, метрика
     усредняется по пользователям. В targets всегда >= 1 элемент (проверено при
     подготовке данных), поэтому деления на ноль нет.
@@ -42,7 +42,7 @@ def ndcg_at_k(ranked: Sequence[int], targets: set[int], k: int) -> float:
     """NDCG@k с бинарной релевантностью: учитывает не только попадание, но и позицию.
 
     Попадание на позиции i (счёт с 1) даёт вклад 1 / log2(i + 1), то есть чем выше,
-    тем больше. DCG — сумма вкладов по попаданиям в первых k позициях. IDCG — DCG
+    тем больше. DCG – сумма вкладов по попаданиям в первых k позициях. IDCG – DCG
     идеального списка, где все targets стоят в начале; в нём не больше
     min(k, len(targets)) слагаемых.
 
@@ -53,11 +53,30 @@ def ndcg_at_k(ranked: Sequence[int], targets: set[int], k: int) -> float:
         них) стоят в начале списка.
     """
     top_k = ranked[:k]  # порядок важен, поэтому список, а не множество
-    dcg = sum(
-        1 / np.log2(position + 1)
-        for position, anime_id in enumerate(top_k, start=1)
-        if anime_id in targets
-    )
-    n_ideal = min(k, len(targets))  # сколько targets вообще могут поместиться в топ-k
-    idcg = sum(1 / np.log2(position + 1) for position in range(1, n_ideal + 1))
+    # DCG: вклад каждого найденного ответа тем меньше, чем ниже его место
+    dcg = 0.0
+    for position, anime_id in enumerate(top_k, start=1):
+        if anime_id in targets:
+            dcg += 1 / np.log2(position + 1)
+    # IDCG: тот же DCG, если бы все ответы (сколько поместится в топ-k) стояли первыми
+    n_ideal = min(k, len(targets))
+    idcg = 0.0
+    for position in range(1, n_ideal + 1):
+        idcg += 1 / np.log2(position + 1)
     return float(dcg / idcg)
+
+
+def ranked_metrics(ranked: Sequence[int], targets: set[int], ks: Sequence[int]) -> dict[str, float]:
+    """recall@k, hit_rate@k и ndcg@k одного списка для каждого k – общий шаг всех оценок.
+
+    :param ranked: Id аниме по убыванию полезности.
+    :param targets: Спрятанные ответы пользователя.
+    :param ks: Значения k.
+    :return: {"recall@k": ..., "hit_rate@k": ..., "ndcg@k": ...} для каждого k по порядку.
+    """
+    row = {}
+    for k in ks:
+        row[f"recall@{k}"] = recall_at_k(ranked, targets, k)
+        row[f"hit_rate@{k}"] = hit_rate_at_k(ranked, targets, k)
+        row[f"ndcg@{k}"] = ndcg_at_k(ranked, targets, k)
+    return row

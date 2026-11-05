@@ -5,13 +5,9 @@ import logging
 import pandas as pd
 
 from core.logs import num
+from core.settings import PROTOCOL
 
 logger = logging.getLogger(__name__)
-
-
-# Protocol v0 parameters; see the status column in docs/system_design.md.
-KEPT_KINDS = ("tv", "movie", "ova", "ona", "special", "tv_special")
-MIN_COMPLETED_PER_ANIME = 5  # аниме с меньшим числом completed в каталог не входят
 
 
 def build_catalog(anime: pd.DataFrame, rates: pd.DataFrame) -> set[int]:
@@ -19,21 +15,24 @@ def build_catalog(anime: pd.DataFrame, rates: pd.DataFrame) -> set[int]:
     которые можно использовать в качестве кандидатов для рекомендательной системы.
 
     :param anime: (anime_id, kind).
-    :param rates: Оценки, по которым считается порог (в пайплайне — train-строки).
+    :param rates: Оценки, по которым считается порог (в пайплайне – train-строки).
     :return: Множество уникальных anime_id
     """
 
-    mask = anime["kind"].isin(KEPT_KINDS)
+    mask = anime["kind"].isin(PROTOCOL.kept_kinds)
     good_kind = anime.loc[mask, "anime_id"]
 
     mask = rates["status"] == "completed"
     completed = rates.loc[mask]
     completed_counts = completed.groupby("anime_id").size()  # completed на аниме
-    popular = completed_counts[completed_counts >= MIN_COMPLETED_PER_ANIME].index
+    popular = completed_counts[completed_counts >= PROTOCOL.min_completed_per_anime].index
 
-    catalog = set(good_kind.tolist()) & set(popular.tolist())
+    # в каталоге – аниме, прошедшие оба условия
+    good_kind_ids = set(good_kind.tolist())
+    popular_ids = set(popular.tolist())
+    catalog = good_kind_ids & popular_ids
     logger.info("каталог: %s аниме (подходящий тип: %s, не меньше %d completed: %s)",
-                num(len(catalog)), num(len(good_kind)), MIN_COMPLETED_PER_ANIME, num(len(popular)))
+                num(len(catalog)), num(len(good_kind)), PROTOCOL.min_completed_per_anime, num(len(popular)))
     return catalog
 
 

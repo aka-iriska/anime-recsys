@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import pandas as pd
 
+from core.settings import PROTOCOL
 
-MAIN_POSITIVE = "p_completed"  # proposal; the other flags are control slices
-MIN_EXPLICIT_FOR_MEAN = 5  # минимум явных оценок, чтобы считать p_above_mean
 FLAG_COLUMNS = ["p_completed", "p_score8", "p_above_mean", "n_dropped"]
 
 
@@ -24,17 +23,17 @@ def mark_positives(rates: pd.DataFrame) -> pd.DataFrame:
     rates_c["p_score8"] = rates_c.score >= 8
     rates_c["p_completed"] = rates_c.status.eq("completed")
     rates_c["n_dropped"] = rates_c.status.eq("dropped")
-    rates_c["is_positive"] = rates_c[MAIN_POSITIVE]
+    rates_c["is_positive"] = rates_c[PROTOCOL.main_positive]
 
     return rates_c
 
 
 def add_above_mean(table: pd.DataFrame, visible: pd.Series) -> pd.DataFrame:
-    """Добавляет `p_above_mean` — оценка выше средней оценки пользователя.
+    """Добавляет `p_above_mean` – оценка выше средней оценки пользователя.
 
     Среднее считается только по строкам с visible=True (train, input), поэтому
     скрытые target-оценки не влияют на флаг. Флаг применяется ко всем строкам.
-    Пользователи с менее чем MIN_EXPLICIT_FOR_MEAN явными оценками получают False.
+    Пользователи с менее чем PROTOCOL.min_explicit_for_mean явными оценками получают False.
 
     :param table: Таблица с user_id и score.
     :param visible: Маска строк, известных модели (split из VISIBLE_SPLITS).
@@ -47,5 +46,5 @@ def add_above_mean(table: pd.DataFrame, visible: pd.Series) -> pd.DataFrame:
     user_mean = seen.groupby(table.user_id).transform("mean")
     user_n = seen.groupby(table.user_id).transform("count")
 
-    table["p_above_mean"] = (explicit > user_mean) & (user_n >= MIN_EXPLICIT_FOR_MEAN)
+    table["p_above_mean"] = (explicit > user_mean) & (user_n >= PROTOCOL.min_explicit_for_mean)
     return table

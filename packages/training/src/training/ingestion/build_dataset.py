@@ -180,7 +180,7 @@ def build_rates(users: set[str], anime_ids: set[str]) -> int:
 def build_history(users: set[str], anime_ids: set[str]) -> int:
     """Строит user_anime_history.csv: объединяет истории двух групп пользователей.
 
-    Группы не пересекаются. id переименовывается в event_id, created_at — в
+    Группы не пересекаются. id переименовывается в event_id, created_at – в
     event_at. Для одной пары пользователь–аниме допустимо много событий.
 
     :param users: Множество user_id когорты.
@@ -365,12 +365,17 @@ def main() -> None:
         CATALOG / "anime_studios.csv", CATALOG / "anime_relations.csv",
         CATALOG / "anime_chronology.csv",
     ]
+    # контрольные суммы исходных файлов: по ним видно, из чего собрана версия
+    checksums = {}
+    for path in sources:
+        relative = str(path.relative_to(ROOT))
+        checksums[relative] = sha256(path)
     manifest = {
         "schema_version": 1,
         "built_at_utc": datetime.now(timezone.utc).isoformat(),
         "description": "Structured source facts for audit; no imputation, label creation or deduplication",
         "tables": counts,
-        "source_sha256": {str(path.relative_to(ROOT)): sha256(path) for path in sources},
+        "source_sha256": checksums,
         "notes": [
             "Original users_rates.csv is an older overlapping snapshot and is not appended.",
             "History files cover disjoint user cohorts and are concatenated.",
@@ -381,11 +386,12 @@ def main() -> None:
     with (OUTPUT / "manifest.json").open("w", encoding="utf-8") as handle:
         json.dump(manifest, handle, ensure_ascii=False, indent=2)
         handle.write("\n")
-    print(json.dumps(counts, ensure_ascii=False, indent=2))
+    counts_text = json.dumps(counts, ensure_ascii=False, indent=2)
+    print(counts_text)
     print(f"Built {OUTPUT}")
 
 
 if __name__ == "__main__":
-    # подробные логи по шагам; уровень — переменная окружения RECSYS_LOG_LEVEL (по умолчанию INFO, таблицы — DEBUG)
+    # подробные логи по шагам; уровень – переменная окружения RECSYS_LOG_LEVEL (по умолчанию INFO, таблицы – DEBUG)
     logs.enable()
     main()

@@ -8,11 +8,11 @@ import pandas as pd
 
 from core import config, logs
 from core.catalog import franchise
-from core.catalog.rules import KEPT_KINDS, MIN_COMPLETED_PER_ANIME, build_catalog, restrict_to_catalog
-from training.interactions.labels import MAIN_POSITIVE, MIN_EXPLICIT_FOR_MEAN, add_above_mean, mark_positives
+from core.catalog.rules import build_catalog, restrict_to_catalog
+from core.settings import PROTOCOL, as_manifest
+from training.interactions.labels import add_above_mean, mark_positives
 from training.interactions.split import (
-    MIN_POSITIVES_PER_USER, SPLITS, TARGET_FRACTION, TARGET_RULE, TARGET_SPLITS, TEST_USER_FRACTION,
-    VAL_USER_FRACTION, VISIBLE_SPLITS, assign_user_groups, drop_unusable_users, split_rows,
+    SPLITS, TARGET_SPLITS, VISIBLE_SPLITS, assign_user_groups, drop_unusable_users, split_rows,
 )
 from core.validation import require
 
@@ -44,9 +44,13 @@ def check_protocol(table: pd.DataFrame, catalog: set[int], sequels: dict[int, se
     :param sequels: Результат franchise.load_sequels.
     :return: Сводка: число строк, пользователей и позитивов по каждому split.
     """
-    require(not table.duplicated(["user_id", "anime_id"]).any(), "Repeated user-anime pair")
-    require(table["anime_id"].isin(catalog).all(), "Row outside the catalog")
-    require(set(table["split"].unique()) <= set(SPLITS), "Unknown split value")
+    # нет повторов пары, всё в каталоге, известные значения split
+    has_repeats = table.duplicated(["user_id", "anime_id"]).any()
+    require(not has_repeats, "Repeated user-anime pair")
+    in_catalog = table["anime_id"].isin(catalog)
+    require(in_catalog.all(), "Row outside the catalog")
+    split_values = set(table["split"].unique())
+    require(split_values <= set(SPLITS), "Unknown split value")
 
     # каждый пользователь целиком в одной группе
     allowed = {
@@ -55,7 +59,8 @@ def check_protocol(table: pd.DataFrame, catalog: set[int], sequels: dict[int, se
         frozenset({"test_input", "test_target"}),
     }
     per_user = table.groupby("user_id")["split"].agg(frozenset)
-    require(per_user.isin(allowed).all(), "User is split across groups or lacks input/target")
+    in_one_group = per_user.isin(allowed)
+    require(in_one_group.all(), "User is split across groups or lacks input/target")
 
     targets = table[table["split"].isin(TARGET_SPLITS)]
     require(targets["is_positive"].all(), "Target contains non-positive rows")
@@ -75,7 +80,8 @@ def check_protocol(table: pd.DataFrame, catalog: set[int], sequels: dict[int, se
         .groupby("anime_id").size()
         .reindex(list(catalog), fill_value=0)
     )
-    require((train_completed >= MIN_COMPLETED_PER_ANIME).all(), "Catalog anime below the train threshold")
+    above_threshold = train_completed >= PROTOCOL.min_completed_per_anime
+    require(above_threshold.all(), "Catalog anime below the train threshold")
 
     positives = table[table["is_positive"]]
     summary = {
@@ -100,22 +106,12 @@ def write_outputs(table: pd.DataFrame, catalog: set[int], summary: dict[str, int
     :param summary: Сводка из check_protocol, попадает в manifest.json.
     """
     table.to_csv(config.INTERACTIONS / "interactions.csv", index=False)
-    pd.Series(sorted(catalog), name="anime_id").to_csv(config.INTERACTIONS / "catalog.csv", index=False)
+    catalog_ids = pd.Series(sorted(catalog), name="anime_id")
+    catalog_ids.to_csv(config.INTERACTIONS / "catalog.csv", index=False)
     manifest = {
         "built_at_utc": datetime.now(timezone.utc).isoformat(),
         "source": str(config.SOURCE.relative_to(config.ROOT)),
-        "config": {
-            "kept_kinds": list(KEPT_KINDS),
-            "min_completed_per_anime": MIN_COMPLETED_PER_ANIME,
-            "main_positive": MAIN_POSITIVE,
-            "min_positives_per_user": MIN_POSITIVES_PER_USER,
-            "min_explicit_for_mean": MIN_EXPLICIT_FOR_MEAN,
-            "val_user_fraction": VAL_USER_FRACTION,
-            "test_user_fraction": TEST_USER_FRACTION,
-            "target_fraction": TARGET_FRACTION,
-            "target_rule": TARGET_RULE,
-            "seed": config.SEED,
-        },
+        "config": as_manifest(protocol=PROTOCOL),
         "summary": summary,
     }
     with (config.INTERACTIONS / "manifest.json").open("w", encoding="utf-8") as handle:
@@ -135,11 +131,13 @@ def main() -> None:
     sequels = franchise.load_sequels()
 
     # 1. только допустимые типы; флаги по строке; группы пользователей и split
-    kind_ids = set(anime.loc[anime["kind"].isin(KEPT_KINDS), "anime_id"])
-    table = mark_positives(restrict_to_catalog(rates, kind_ids))
+    is_kept_kind = anime["kind"].isin(PROTOCOL.kept_kinds)
+    kind_ids = set(anime.loc[is_kept_kind, "anime_id"])
+    kept_rates = restrict_to_catalog(rates, kind_ids)
+    table = mark_positives(kept_rates)
     groups = assign_user_groups(table)
 
-    # 2. каталог только по train-пользователям и ограничение каталогом — до выбора target,
+    # 2. каталог только по train-пользователям и ограничение каталогом – до выбора target,
     # чтобы правило «без дыр» у val/test судило по тем же аниме, что у train-частей ranking
     train_rows = table[table["user_id"].map(groups) == "train"]
     catalog = build_catalog(anime, train_rows)
@@ -149,18 +147,20 @@ def main() -> None:
     table, dropped_users = drop_unusable_users(table)
     logs.table(logger, "таблица взаимодействий после ограничения каталогом", table)
 
-    # 3. признаки, зависящие от других строк пользователя, — по известной части
-    table = add_above_mean(table, table["split"].isin(VISIBLE_SPLITS))
+    # 3. признаки, зависящие от других строк пользователя, – по известной части
+    is_visible = table["split"].isin(VISIBLE_SPLITS)
+    table = add_above_mean(table, is_visible)
 
     summary = check_protocol(table, catalog, sequels)
     summary["dropped_eval_users"] = dropped_users
     config.INTERACTIONS.mkdir(parents=True)
     write_outputs(table, catalog, summary)
-    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    summary_text = json.dumps(summary, ensure_ascii=False, indent=2)
+    print(summary_text)
     print(f"Built {config.INTERACTIONS}")
 
 
 if __name__ == "__main__":
-    # подробные логи по шагам; уровень — переменная окружения RECSYS_LOG_LEVEL (по умолчанию INFO, таблицы — DEBUG)
+    # подробные логи по шагам; уровень – переменная окружения RECSYS_LOG_LEVEL (по умолчанию INFO, таблицы – DEBUG)
     logs.enable()
     main()
