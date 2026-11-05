@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 # признаки избранного: те же связи и жанры, но только по избранным аниме
 FAVOURITE_FEATURES: list[str] = [f"fav_{c}" for c in [*franchise.FEATURES, *history.GENRE_FEATURES]]
 
-# группы признаков ранжирования; порядок колонок модели — порядок групп и колонок внутри них
+# группы признаков ранжирования; порядок колонок модели – порядок групп и колонок внутри них
 FEATURE_GROUPS: dict[str, list[str]] = {
     "retrieval": ["retrieval_score", "retrieval_rank"],
     "popularity": ["popularity"],
@@ -42,10 +42,10 @@ def group_columns(groups: list[str]) -> list[str]:
 def favourite_history(history_rows: pd.DataFrame, favourites: pd.DataFrame) -> pd.DataFrame:
     """Избранные аниме пользователя, которые есть в его истории.
 
-    В датасете избранное — итоговое состояние профиля и может содержать спрятанные ответы,
+    В датасете избранное – итоговое состояние профиля и может содержать спрятанные ответы,
     поэтому берём только то, что пользователь и так досмотрел в известной модели истории.
 
-    :param history_rows: История (user_id, anime_id): для датасета — input, в продукте — вся.
+    :param history_rows: История (user_id, anime_id): для датасета – input, в продукте – вся.
     :param favourites: Избранные аниме (user_id, anime_id).
     :return: DataFrame с колонками user_id, anime_id: подмножество истории.
     """
@@ -58,10 +58,10 @@ def favourite_history(history_rows: pd.DataFrame, favourites: pd.DataFrame) -> p
 
 def pair_features(pairs: pd.DataFrame, history_rows: pd.DataFrame, favourites: pd.DataFrame,
                   item_features: pd.DataFrame, links: pd.DataFrame, genres: pd.DataFrame) -> pd.DataFrame:
-    """Признаки пары «пользователь — кандидат»: франшиза, жанры, профиль, избранное.
+    """Признаки пары «пользователь – кандидат»: франшиза, жанры, профиль, избранное.
 
-    Один и тот же код для обучения и для выдачи: в датасете history_rows — input-история
-    (без спрятанных ответов), в продукте — вся история пользователя.
+    Один и тот же код для обучения и для выдачи: в датасете history_rows – input-история
+    (без спрятанных ответов), в продукте – вся история пользователя.
 
     :param pairs: Пары (user_id, anime_id): кандидаты.
     :param history_rows: Что пользователь досмотрел и модель «знает» (user_id, anime_id).

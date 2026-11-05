@@ -8,4 +8,4 @@ models
 notebooks
 docs
 experiments
-packages/training/src
+backend/training/src

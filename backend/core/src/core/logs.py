@@ -8,18 +8,18 @@ import numpy as np
 import pandas as pd
 
 
-# логгеры проекта: имена модулей начинаются с них; "__main__" — модуль, запущенный через python -m
+# логгеры проекта: имена модулей начинаются с них; "__main__" – модуль, запущенный через python -m
 PACKAGES = ("core", "training", "serving", "__main__")
 
 
 def enable(level: int | str | None = None) -> None:
     """Включает подробные логи проекта (в ноутбуке или скрипте); логи библиотек не трогает.
 
-    :param level: Уровень: logging.DEBUG (или "DEBUG") — таблицы и формы на каждом шаге,
-        logging.INFO — только итоги. None — из переменной окружения RECSYS_LOG_LEVEL, а без
+    :param level: Уровень: logging.DEBUG (или "DEBUG") – таблицы и формы на каждом шаге,
+        logging.INFO – только итоги. None – из переменной окружения RECSYS_LOG_LEVEL, а без
         неё INFO. Неизвестное имя уровня не роняет программу: берётся INFO.
     """
-    # уровень не задан явно — берём из окружения
+    # уровень не задан явно – берём из окружения
     if level is None:
         level = os.environ.get("RECSYS_LOG_LEVEL", "INFO")
     # имя уровня → число; опечатка в имени не должна ронять обучение
@@ -32,7 +32,8 @@ def enable(level: int | str | None = None) -> None:
         # обработчик один раз: повторный вызов в ноутбуке не удваивает вывод
         if not logger.handlers:
             handler = logging.StreamHandler(sys.stdout)
-            handler.setFormatter(logging.Formatter("[%(name)s] %(message)s"))
+            formatter = logging.Formatter("[%(name)s] %(message)s")
+            handler.setFormatter(formatter)
             logger.addHandler(handler)
         logger.propagate = False
 
@@ -74,8 +75,9 @@ def counts(logger: logging.Logger, title: str, values: pd.Series) -> None:
     if not logger.isEnabledFor(logging.DEBUG):
         return
     n = values.value_counts()
-    summary = pd.DataFrame({"строк": n, "доля": (n / n.sum()).round(3)})
-    # число строк — с разделителем разрядов
+    share = (n / n.sum()).round(3)
+    summary = pd.DataFrame({"строк": n, "доля": share})
+    # число строк – с разделителем разрядов
     text = summary.to_string(formatters={"строк": num})
     logger.debug("%s:\n%s\n", title, text)
 
