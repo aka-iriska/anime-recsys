@@ -1,12 +1,11 @@
 services:
   backend:
     build:
-      context: .
-      dockerfile: deploy/backend/Dockerfile
+      context: ./backend
     ports:
       - "8000:8000"
     volumes:
-      - ./models:/app/models:ro  # артефакты модели: переобучили – перезапустили контейнер, пересборка не нужна
+      - ./backend/models:/app/models:ro  # артефакты модели: переобучили – перезапустили контейнер, пересборка не нужна
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 10s

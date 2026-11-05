@@ -101,10 +101,10 @@ The backend image contains only `core` and `serving`; model files are mounted fr
 ## Repository
 
 ```
-backend/
-  core/       shared kernel: paths, catalog rules, anime features
-  serving/    Recommender (iALS -> CatBoost -> rules) and the FastAPI app
-  training/   everything offline
+backend/          the Python side: one uv workspace (pyproject.toml, uv.lock, Dockerfile)
+  core/           shared kernel: paths, catalog rules, anime features
+  serving/        Recommender (iALS -> CatBoost -> rules) and the FastAPI app
+  training/       everything offline
     ingestion/      raw snapshots -> normalized tables
     interactions/   labels, user split, evaluation data
     evaluation/     metrics, evaluation loop, bootstrap
@@ -113,10 +113,11 @@ backend/
     reranking/      evaluation of the feed rules
     simulation/     feedback loop and simulated A/B test
     pipelines/      final test, train final models and export them for serving
-frontend/     static web feed (nginx)
-notebooks/    audit, baselines, item-kNN, retrieval comparison, ranking, re-ranking, test, simulation
-docs/         system design, dataset schema, recsys playbook
-experiments/  index of experiments with key metrics
+  notebooks/      audit, baselines, item-kNN, retrieval comparison, ranking, re-ranking, test, simulation
+  experiments/    index of experiments with key metrics
+  data/, models/  local data and model artifacts (not in Git)
+frontend/         static web feed (nginx)
+docs/             system design, dataset schema, recsys playbook
 ```
 
 Three packages in one uv workspace. `serving` depends only on `core`, so a production image contains no training code or training libraries.

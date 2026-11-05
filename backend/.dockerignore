@@ -1,11 +1,8 @@
-.git
-.idea
 .venv
 **/__pycache__
 catboost_info
 data
 models
 notebooks
-docs
 experiments
-backend/training/src
+training/src

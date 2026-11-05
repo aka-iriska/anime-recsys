@@ -20,7 +20,7 @@ dev = [
 ]
 
 [tool.uv.workspace]
-members = ["backend/*"]  # core, serving, training; прод ставит только serving: uv sync --package serving
+members = ["core", "serving", "training"]  # явно: рядом лежат notebooks, data, models; прод ставит только serving: uv sync --package serving
 
 [tool.uv.sources]
 core = { workspace = true }

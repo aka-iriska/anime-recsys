@@ -1,5 +1,5 @@
 # Бэкенд ленты: только пакет serving (+ core). Кода и библиотек обучения в образе нет.
-# Сборка из корня репозитория: docker compose build backend
+# Контекст сборки – папка backend/: docker compose build backend (из корня репозитория)
 
 # 1. сборка окружения: uv ставит serving и его зависимости по lock-файлу
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS build
@@ -8,12 +8,12 @@ ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
 
 # описания workspace нужны uv целиком, а исходники – только core и serving
 COPY pyproject.toml uv.lock ./
-COPY backend/core/pyproject.toml backend/core/pyproject.toml
-COPY backend/serving/pyproject.toml backend/serving/pyproject.toml
-COPY backend/training/pyproject.toml backend/training/pyproject.toml
+COPY core/pyproject.toml core/pyproject.toml
+COPY serving/pyproject.toml serving/pyproject.toml
+COPY training/pyproject.toml training/pyproject.toml
 RUN uv sync --frozen --package serving --no-dev --no-editable --no-install-workspace
-COPY backend/core backend/core
-COPY backend/serving backend/serving
+COPY core core
+COPY serving serving
 RUN uv sync --frozen --package serving --no-dev --no-editable
 
 # 2. итоговый образ: только готовое окружение, без uv и без исходников

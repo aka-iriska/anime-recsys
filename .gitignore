@@ -24,7 +24,7 @@ htmlcov/
 .cache/huggingface/
 
 # Data
-/data
+/backend/data
 
 # Local credentials
 .env
@@ -38,5 +38,5 @@ Thumbs.db
 /shikimori-rec-sys/.idea
 
 # Generated model artifacts and CatBoost logs
-/models
+/backend/models
 catboost_info/

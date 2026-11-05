@@ -326,7 +326,7 @@ wheels = [
 [[package]]
 name = "core"
 version = "0.1.0"
-source = { editable = "backend/core" }
+source = { editable = "core" }
 dependencies = [
     { name = "numpy" },
     { name = "pandas" },
@@ -1800,7 +1800,7 @@ wheels = [
 [[package]]
 name = "serving"
 version = "0.1.0"
-source = { editable = "backend/serving" }
+source = { editable = "serving" }
 dependencies = [
     { name = "catboost" },
     { name = "core" },
@@ -1814,7 +1814,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "catboost", specifier = ">=1.2.10" },
-    { name = "core", editable = "backend/core" },
+    { name = "core", editable = "core" },
     { name = "fastapi", specifier = ">=0.162.0" },
     { name = "numpy", specifier = ">=2.5.3" },
     { name = "pandas", specifier = ">=3.0.6" },
@@ -1843,9 +1843,9 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "core", editable = "backend/core" },
-    { name = "serving", editable = "backend/serving" },
-    { name = "training", editable = "backend/training" },
+    { name = "core", editable = "core" },
+    { name = "serving", editable = "serving" },
+    { name = "training", editable = "training" },
 ]
 
 [package.metadata.requires-dev]
@@ -2006,7 +2006,7 @@ wheels = [
 [[package]]
 name = "training"
 version = "0.1.0"
-source = { editable = "backend/training" }
+source = { editable = "training" }
 dependencies = [
     { name = "catboost" },
     { name = "core" },
@@ -2022,14 +2022,14 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "catboost", specifier = ">=1.2.10" },
-    { name = "core", editable = "backend/core" },
+    { name = "core", editable = "core" },
     { name = "huggingface-hub", specifier = ">=2.4.0" },
     { name = "implicit", specifier = ">=0.7.3" },
     { name = "numpy", specifier = ">=2.5.3" },
     { name = "optuna", specifier = ">=5.0.0" },
     { name = "pandas", specifier = ">=3.0.6" },
     { name = "scipy", specifier = ">=1.18.1" },
-    { name = "serving", editable = "backend/serving" },
+    { name = "serving", editable = "serving" },
 ]
 
 [[package]]
