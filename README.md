@@ -65,38 +65,51 @@ A snapshot of 2,000 active Shikimori users collected on 2026-09-24 with a modifi
 
 ## Quick start
 
+Everything Python lives in `backend/`, so commands run from there.
+The same steps are in the `Makefile`: `make help` lists them (`make install`, `make data`, `make export`, `make api`, `make web`, `make test`, ...).
+
 ```bash
+cd backend
 uv sync                                                    # installs core, serving, training and notebook tools
 uv run python -m training.ingestion.build_dataset     # raw snapshots in data/raw -> normalized tables
 uv run python -m training.interactions.prepare        # catalog, labels, user split
 uv run python -m training.retrieval.als               # compare retrieval models on validation
-uv run python -m training.pipelines.export_models     # train the final iALS, save to models/
+uv run python -m training.pipelines.export_models     # train final iALS and CatBoost, save to models/
 ```
 
 ```python
 from serving.recommender import Recommender
 
-feed = Recommender.load().recommend(history=[1, 205, 30, 47, 43], k=5)
-for item in feed:
-    print(item.russian or item.name)
+feed = Recommender.load().feed(history=[1, 205, 30, 47, 43], k=5)
+for item in feed.items:
+    print(item.card.title, "–", item.reason)
 ```
 
-For the history *Cowboy Bebop, Samurai Champloo, Evangelion, Akira, Ghost in the Shell* this returns *The End of Evangelion*, *Cowboy Bebop: The Movie*, *Great Teacher Onizuka*, *Perfect Blue*, *Paprika*.
+For the history *Cowboy Bebop, Samurai Champloo, Evangelion, Akira, Ghost in the Shell* this returns *Ghost in the Shell 2: Innocence* (sequel of Ghost in the Shell), *The End of Evangelion* (sequel of Evangelion), *Cowboy Bebop: The Movie* (related to Cowboy Bebop), *Paprika* and *Perfect Blue* (similar to Akira).
+
+Posters are optional. They come from the public Shikimori API via `examples/parse_posters.py` in [shikimori-parse](https://github.com/kdduha/shikimori-parse) and are expected in `backend/data/posters/posters.csv`; the feed only links to them.
 
 For production, install only the serving package: `uv sync --package serving --no-dev`.
 
 ## Run the API
 
 ```bash
-uv run python -m training.pipelines.export_models   # once: writes models/als_v0
-docker compose up --build                            # backend on http://localhost:8000
+cd backend && uv run python -m training.pipelines.export_models && cd ..   # once: writes backend/models/
+docker compose up --build                            # API on http://localhost:8000, feed on http://localhost:3000
 ```
+
+| Endpoint | What it does |
+| --- | --- |
+| `POST /feed` | Feed for `{"history": [...], "exclude": [...], "favourites": [...], "k": 10}`: iALS takes 100 candidates, CatBoost reorders them, product rules build the top 10. Each item has a poster and a reason: "sequel of …", "related to …", "similar to …". An empty history gives a popularity feed. |
+| `GET /anime/search?q=` | Title search in Russian or romaji, to build a history |
+| `GET /anime/{id}` | Title card |
+| `GET /info` | Build date, data version and settings of every model |
 
 ```bash
 curl -X POST localhost:8000/feed -H "Content-Type: application/json" -d '{"history": [1, 205, 30, 47, 43], "k": 5}'
 ```
 
-The backend image contains only `core` and `serving`; model files are mounted from `models/`, so retraining needs a container restart, not a rebuild. The frontend is static HTML and JavaScript behind nginx; the history lives in the browser. Without Docker: `uv run uvicorn serving.api:app` and `uv run python -m http.server 3000 --directory frontend`.
+The backend image contains only `core` and `serving`; model files are mounted from `backend/models/`, so retraining needs a container restart, not a rebuild. The frontend is static HTML and JavaScript behind nginx; the history lives in the browser. Without Docker: `uv run --project backend uvicorn serving.api:app` and `uv run --project backend python -m http.server 3000 --directory frontend` from the repository root.
 
 ## Repository
 
@@ -122,7 +135,7 @@ docs/             system design, dataset schema, recsys playbook
 
 Three packages in one uv workspace. `serving` depends only on `core`, so a production image contains no training code or training libraries.
 
-The notebooks hold the reasoning behind each decision; [experiments/README.md](experiments/README.md) lists every experiment with its numbers.
+The notebooks hold the reasoning behind each decision; [backend/experiments/README.md](backend/experiments/README.md) lists every experiment with its numbers.
 
 ## Roadmap
 
@@ -139,4 +152,4 @@ The notebooks hold the reasoning behind each decision; [experiments/README.md](e
 
 ## Limitations
 
-All numbers are offline proxies: there are no impression or click logs, so "the user finished a hidden title" stands in for "the user would like the recommendation". Validation has 173 users, and model settings were chosen on it; the test group stays untouched until the final pipeline is fixed. The cohort is active users only and doesn't represent all of Shikimori.
+All numbers are offline proxies: there are no impression or click logs, so "the user finished a hidden title" stands in for "the user would like the recommendation". Validation has 173 users, and model settings were chosen on it; the test group was used only after the pipeline was fixed: once for the final check and once for the simulation. The cohort is active users only and doesn't represent all of Shikimori. The simulation inherits the offline label: a title outside the hidden set counts as unwanted, and the ranker was trained to find exactly those titles, so it measures the effect of the feedback loop, not real user satisfaction.
