@@ -10,13 +10,14 @@
 
 ## Project layout
 
-- Keep all Python code in the uv workspace under `packages/`: three installable packages, each organised by domain (DDD-style bounded contexts). Do not put Python files elsewhere:
-  - `packages/core` → `core`: shared kernel used by both sides — `config` (paths, seed), `validation`, `catalog` (`rules`: what may be recommended; `anime`: anime attributes and features). Depends only on numpy/pandas.
-  - `packages/serving` → `serving`: production inference from exported artifacts — `artifacts`, `recommender` (later the FastAPI app). Depends on `core` only; it must never import `training` or training-only libraries (`implicit`, `scipy`).
-  - `packages/training` → `training`: offline work — `ingestion` (raw → tables), `interactions` (labels, user split, protocol data), `evaluation` (metrics, loop, statistics), `retrieval` (popularity, item-kNN, SVD, iALS), `ranking` (candidate dataset, CatBoost), `pipelines` (train final models, export artifacts). May import `core` and `serving` (artifact format).
+- Keep all Python code in the uv workspace under `backend/`: three installable packages, each organised by domain (DDD-style bounded contexts). Do not put Python files elsewhere:
+  - `backend/core` → `core`: shared kernel used by both sides – `config` (paths, seed), `validation`, `catalog` (`rules`: what may be recommended; `anime`: anime attributes and features). Depends only on numpy/pandas.
+  - `backend/serving` → `serving`: production inference from exported artifacts – `artifacts`, `recommender` (iALS → CatBoost → rules), `rerank`, `directory` (cards, search), `api` (FastAPI), `settings` (`ServerSettings`). Depends on `core` only; it must never import `training` or training-only libraries (`implicit`, `scipy`).
+  - `backend/training` → `training`: offline work – `ingestion` (raw → tables), `interactions` (labels, user split, protocol data), `evaluation` (metrics, loop, statistics), `retrieval` (popularity, item-kNN, SVD, iALS), `ranking` (candidate dataset, CatBoost), `reranking` (evaluation of feed rules), `simulation` (feedback loop, simulated A/B), `pipelines` (final test, train final models, export artifacts). May import `core` and `serving` (artifact format).
+- The web feed lives in `frontend/` (static HTML, CSS and JavaScript behind nginx, no build step).
 - Deployment files live in `deploy/` (one folder per service, e.g. `deploy/backend/Dockerfile`) and `docker-compose.yml` at the root. The backend image installs only `serving` and mounts `models/` read-only.
-- Declare dependencies in the package that needs them (`packages/*/pyproject.toml`); notebook tools stay in the root `dev` group. Production installs only the serving package: `uv sync --package serving --no-dev`.
-- Keep research and project artifacts outside `packages/`: notebooks in `notebooks/`, raw and processed data in `data/`, design notes in `docs/`, and experiment records in `experiments/`.
+- Declare dependencies in the package that needs them (`backend/*/pyproject.toml`); notebook tools stay in the root `dev` group. Production installs only the serving package: `uv sync --package serving --no-dev`.
+- Keep research and project artifacts outside `backend/`: notebooks in `notebooks/`, raw and processed data in `data/`, design notes in `docs/`, and experiment records in `experiments/`.
 - Use notebooks for exploration, visualizations, and written findings. Put reusable pipeline and model code in the package; notebooks import it directly (`from training.retrieval import als`).
 - Prefer small functions first. Add classes only when a component has useful persistent state or a clear interface.
 - Prefer flat, readable code: one step per line with a named intermediate variable instead of nested calls (write `model = fit_als(confidence, factors)` then `make_als_ranker(model, ...)`, not `make_als_ranker(fit_als(confidence, factors), ...)`). Put a one-line comment before each step of an algorithm saying what it does.

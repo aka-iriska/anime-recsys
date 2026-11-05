@@ -96,12 +96,12 @@ docker compose up --build                            # backend on http://localho
 curl -X POST localhost:8000/feed -H "Content-Type: application/json" -d '{"history": [1, 205, 30, 47, 43], "k": 5}'
 ```
 
-The image contains only `core` and `serving`; model files are mounted from `models/`, so retraining needs a container restart, not a rebuild. Without Docker: `uv run uvicorn serving.api:app`. A web frontend is planned (`docker compose --profile frontend up`).
+The backend image contains only `core` and `serving`; model files are mounted from `models/`, so retraining needs a container restart, not a rebuild. The frontend is static HTML and JavaScript behind nginx; the history lives in the browser. Without Docker: `uv run uvicorn serving.api:app` and `uv run python -m http.server 3000 --directory frontend`.
 
 ## Repository
 
 ```
-packages/
+backend/
   core/       shared kernel: paths, catalog rules, anime features
   serving/    Recommender (iALS -> CatBoost -> rules) and the FastAPI app
   training/   everything offline

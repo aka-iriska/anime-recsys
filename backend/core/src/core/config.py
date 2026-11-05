@@ -3,7 +3,7 @@ from pathlib import Path
 
 
 # корень репозитория: backend/core/src/core/config.py; в контейнере пакет установлен в
-# site-backend, поэтому корень задаётся переменной окружения RECSYS_ROOT
+# site-packages, поэтому корень задаётся переменной окружения RECSYS_ROOT
 REPOSITORY = Path(__file__).resolve().parents[4]
 ROOT = Path(os.environ.get("RECSYS_ROOT", REPOSITORY))
 DATA = ROOT / "data"

@@ -6,14 +6,14 @@ FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS build
 WORKDIR /app
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
 
-# описания workspace нужны uv целиком, а исходники — только core и serving
+# описания workspace нужны uv целиком, а исходники – только core и serving
 COPY pyproject.toml uv.lock ./
-COPY packages/core/pyproject.toml packages/core/pyproject.toml
-COPY packages/serving/pyproject.toml packages/serving/pyproject.toml
-COPY packages/training/pyproject.toml packages/training/pyproject.toml
+COPY backend/core/pyproject.toml backend/core/pyproject.toml
+COPY backend/serving/pyproject.toml backend/serving/pyproject.toml
+COPY backend/training/pyproject.toml backend/training/pyproject.toml
 RUN uv sync --frozen --package serving --no-dev --no-editable --no-install-workspace
-COPY packages/core packages/core
-COPY packages/serving packages/serving
+COPY backend/core backend/core
+COPY backend/serving backend/serving
 RUN uv sync --frozen --package serving --no-dev --no-editable
 
 # 2. итоговый образ: только готовое окружение, без uv и без исходников
